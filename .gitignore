@@ -6,3 +6,17 @@
 config.mak
 lib/musl-gcc.specs
 /obj/
+
+*.log
+*.tmp
+*.bak
+build-*/
+*.map
+*.elf
+*.ko
+*.mod*
+*.dSYM/
+.cache/
+cscope.out
+tags
+TAGS
