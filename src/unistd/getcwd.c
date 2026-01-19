@@ -2,24 +2,45 @@
 #include <errno.h>
 #include <limits.h>
 #include <string.h>
+#include <stdlib.h>
 #include "syscall.h"
 
 char *getcwd(char *buf, size_t size)
 {
-	char tmp[buf ? 1 : PATH_MAX];
+	char *tmp = NULL;
+	int allocated = 0;
+	
 	if (!buf) {
-		buf = tmp;
-		size = sizeof tmp;
+		buf = malloc(PATH_MAX);
+		if (!buf) {
+			errno = ENOMEM;
+			return NULL;
+		}
+		tmp = buf;
+		size = PATH_MAX;
+		allocated = 1;
 	} else if (!size) {
 		errno = EINVAL;
-		return 0;
+		return NULL;
 	}
+	
 	long ret = syscall(SYS_getcwd, buf, size);
-	if (ret < 0)
-		return 0;
+	if (ret < 0) {
+		if (allocated) free(buf);
+		return NULL;
+	}
+	
 	if (ret == 0 || buf[0] != '/') {
 		errno = ENOENT;
-		return 0;
+		if (allocated) free(buf);
+		return NULL;
 	}
-	return buf == tmp ? strdup(buf) : buf;
+	
+	if (allocated) {
+		char *result = strdup(buf);
+		free(buf);
+		return result;
+	}
+	
+	return buf;
 }
