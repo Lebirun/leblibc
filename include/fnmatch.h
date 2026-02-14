@@ -11,6 +11,7 @@ extern "C" {
 #define	FNM_LEADING_DIR	0x8           
 #define	FNM_CASEFOLD	0x10
 #define	FNM_FILE_NAME	FNM_PATHNAME
+#define	FNM_EXTMATCH	0x20
 
 #define	FNM_NOMATCH 1
 #define FNM_NOSYS   (-1)
