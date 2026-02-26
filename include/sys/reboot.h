@@ -11,6 +11,7 @@ extern "C" {
 #define RB_POWER_OFF    0x4321fedc
 #define RB_SW_SUSPEND   0xd000fce2
 #define RB_KEXEC        0x45584543
+#define RB_SOFT_REBOOT  0x4c454200
 
 int reboot(int);
 
