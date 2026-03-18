@@ -205,10 +205,10 @@ $(DESTDIR)$(includedir)/%: $(srcdir)/include/%
 $(DESTDIR)$(LDSO_PATHNAME): $(DESTDIR)$(libdir)/libc.so
 	$(INSTALL) -D -l $(libdir)/libc.so $@ || true
 
-install-libs: build-i386
+install-libs: build-x86_64
 	mkdir -p $(DESTDIR)$(libdir)
-	cp build-i386/lib/*.a $(DESTDIR)$(libdir)/
-	cp build-i386/lib/crt*.o $(DESTDIR)$(libdir)/
+	cp build-x86_64/lib/*.a $(DESTDIR)$(libdir)/
+	cp build-x86_64/lib/crt*.o $(DESTDIR)$(libdir)/
 
 install-headers: $(ALL_INCLUDES:include/%=$(DESTDIR)$(includedir)/%)
 
@@ -224,21 +224,21 @@ musl-%.tar.gz: .git
 
 endif
 
-build-i386:
-	@echo "Building leblibc for i386..."
-	mkdir -p build-i386
-	cd build-i386 && AR=i686-elf-ar RANLIB=i686-elf-ranlib CC=i686-elf-gcc CFLAGS="-O2 -g -m32" LDFLAGS="-m32" ../configure --host=i686-elf --prefix=/ --disable-shared --enable-static
-	$(MAKE) -C build-i386
+build-x86_64:
+	@echo "Building leblibc for x86_64..."
+	mkdir -p build-x86_64
+	cd build-x86_64 && AR=x86_64-elf-ar RANLIB=x86_64-elf-ranlib CC=x86_64-elf-gcc CFLAGS="-O2 -g" LDFLAGS="" ../configure --host=x86_64-elf --prefix=/ --disable-shared --enable-static
+	$(MAKE) -C build-x86_64
 
-install-i386: build-i386
+install-x86_64: build-x86_64
 	mkdir -p $(STAGING_DIR)
-	$(MAKE) -C build-i386 install DESTDIR=$(STAGING_DIR)
+	$(MAKE) -C build-x86_64 install DESTDIR=$(STAGING_DIR)
 
 clean:
 	rm -rf obj lib
 
 distclean: clean
 	rm -f config.mak
-	rm -rf build-i386
+	rm -rf build-x86_64
 
-.PHONY: all clean install install-libs install-headers install-tools build-i386 install-i386
+.PHONY: all clean install install-libs install-headers install-tools build-x86_64 install-x86_64

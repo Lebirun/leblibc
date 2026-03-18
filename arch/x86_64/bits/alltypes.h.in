@@ -1,0 +1,30 @@
+#define _Addr long
+#define _Int64 long
+#define _Reg long
+
+#define __BYTE_ORDER 1234
+#define __LONG_MAX 0x7fffffffffffffffL
+
+#ifndef __cplusplus
+#ifdef __WCHAR_TYPE__
+TYPEDEF __WCHAR_TYPE__ wchar_t;
+#else
+TYPEDEF int wchar_t;
+#endif
+#endif
+
+#if defined(__FLT_EVAL_METHOD__) && __FLT_EVAL_METHOD__ == 0
+TYPEDEF float float_t;
+TYPEDEF double double_t;
+#else
+TYPEDEF long double float_t;
+TYPEDEF long double double_t;
+#endif
+
+#if !defined(__cplusplus)
+TYPEDEF struct { _Alignas(16) long long __ll; long double __ld; } max_align_t;
+#elif defined(__GNUC__)
+TYPEDEF struct { __attribute__((__aligned__(16))) long long __ll; long double __ld; } max_align_t;
+#else
+TYPEDEF struct { alignas(16) long long __ll; long double __ld; } max_align_t;
+#endif
