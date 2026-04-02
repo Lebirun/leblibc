@@ -11,6 +11,7 @@ static void dummy(void) {}
 weak_alias(dummy, _init);
 
 extern weak hidden void (*const __init_array_start)(void), (*const __init_array_end)(void);
+extern weak hidden void (*const __CTOR_LIST__)(void), (*const __CTOR_END__)(void);
 
 static void dummy1(void *p) {}
 weak_alias(dummy1, __init_ssp);
@@ -58,10 +59,18 @@ void __init_libc(char **envp, char *pn)
 
 static void libc_start_init(void)
 {
+	uintptr_t a;
+	void (*fn)(void);
 	_init();
-	uintptr_t a = (uintptr_t)&__init_array_start;
+	a = (uintptr_t)&__init_array_start;
 	for (; a<(uintptr_t)&__init_array_end; a+=sizeof(void(*)()))
 		(*(void (**)(void))a)();
+	a = (uintptr_t)&__CTOR_LIST__;
+	for (; a<(uintptr_t)&__CTOR_END__; a+=sizeof(void(*)())) {
+		fn = *(void (**)(void))a;
+		if (fn && (uintptr_t)fn != (uintptr_t)-1)
+			fn();
+	}
 }
 
 weak_alias(libc_start_init, __libc_start_init);

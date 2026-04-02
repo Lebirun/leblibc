@@ -138,7 +138,6 @@
 #define __NR_setfsuid32 (147 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_setfsgid (148 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_setfsgid32 (148 | LEBIRUN_SYSCALL_FLAG)
-#define __NR__llseek (63 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_lseek (63 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_getdents (80 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_getdents64 (178 | LEBIRUN_SYSCALL_FLAG)
