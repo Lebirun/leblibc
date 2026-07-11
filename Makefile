@@ -227,7 +227,7 @@ endif
 build-x86_64:
 	@echo "Building leblibc for x86_64..."
 	mkdir -p build-x86_64
-	cd build-x86_64 && AR=x86_64-elf-ar RANLIB=x86_64-elf-ranlib CC=x86_64-elf-gcc CFLAGS="-Os -ffunction-sections -fdata-sections -fno-unwind-tables -fno-asynchronous-unwind-tables" LDFLAGS="" ../configure --host=x86_64-elf --prefix=/ --disable-shared --enable-static
+	cd build-x86_64 && AR=x86_64-elf-ar RANLIB=x86_64-elf-ranlib CC=x86_64-elf-gcc CFLAGS="-Os -ffunction-sections -fdata-sections -fno-unwind-tables -fno-asynchronous-unwind-tables" LDFLAGS="" ../configure --host=x86_64-elf --prefix=/usr --disable-shared --enable-static
 	$(MAKE) -C build-x86_64
 
 install-x86_64: build-x86_64
