@@ -205,10 +205,10 @@ $(DESTDIR)$(includedir)/%: $(srcdir)/include/%
 $(DESTDIR)$(LDSO_PATHNAME): $(DESTDIR)$(libdir)/libc.so
 	$(INSTALL) -D -l $(libdir)/libc.so $@ || true
 
-install-libs: build-x86_64
+install-libs: $(STATIC_LIBS) $(EMPTY_LIBS) $(CRT_LIBS)
 	mkdir -p $(DESTDIR)$(libdir)
-	cp build-x86_64/lib/*.a $(DESTDIR)$(libdir)/
-	cp build-x86_64/lib/crt*.o $(DESTDIR)$(libdir)/
+	cp lib/*.a $(DESTDIR)$(libdir)/
+	cp lib/crt*.o $(DESTDIR)$(libdir)/
 
 install-headers: $(ALL_INCLUDES:include/%=$(DESTDIR)$(includedir)/%)
 
