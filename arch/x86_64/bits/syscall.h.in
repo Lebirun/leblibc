@@ -1,4 +1,6 @@
+#ifndef LEBIRUN_SYSCALL_FLAG
 #define LEBIRUN_SYSCALL_FLAG 0x80000000
+#endif
 
 #define __NR_exit (0 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_write (1 | LEBIRUN_SYSCALL_FLAG)
@@ -184,8 +186,8 @@
 #define __NR_lchown (216 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_lchown32 (216 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_getcwd (72 | LEBIRUN_SYSCALL_FLAG)
-#define __NR_capget (184 | LEBIRUN_SYSCALL_FLAG)
-#define __NR_capset (185 | LEBIRUN_SYSCALL_FLAG)
+#define __NR_capget (288 | LEBIRUN_SYSCALL_FLAG)
+#define __NR_capset (289 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_sigaltstack (130 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_sendfile (187 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_sendfile64 (187 | LEBIRUN_SYSCALL_FLAG)
