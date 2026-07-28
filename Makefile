@@ -33,7 +33,7 @@ LDFLAGS_AUTO =
 LIBCC = -lgcc
 CPPFLAGS =
 CFLAGS =
-CFLAGS_AUTO = -Os -pipe
+CFLAGS_AUTO = -Oz -pipe -ffunction-sections -fdata-sections
 CFLAGS_C99FSE = -std=c99 -ffreestanding -nostdinc 
 
 CFLAGS_ALL = $(CFLAGS_C99FSE)
