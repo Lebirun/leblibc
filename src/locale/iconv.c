@@ -45,7 +45,7 @@ static const unsigned char charmaps[] =
 "shiftjis\0sjis\0cp932\0\0\321"
 "iso2022jp\0\0\322"
 "gb18030\0\0\330"
-"gbk\0\0\331"
+"gbk\0cp936\0windows936\0\0\331"
 "gb2312\0\0\332"
 "big5\0bigfive\0cp950\0big5hkscs\0\0\340"
 "euckr\0ksc5601\0ksx1001\0cp949\0\0\350"
@@ -62,6 +62,10 @@ static const unsigned short jis0208[84][94] = {
 
 static const unsigned short gb18030[126][190] = {
 #include "gb18030.h"
+};
+
+static const unsigned short gb18030utf[][2] = {
+#include "gb18030utf.h"
 };
 
 static const unsigned short big5[89][157] = {
@@ -213,6 +217,8 @@ static unsigned uni_to_jis(unsigned c)
 	}
 }
 
+#define countof(a) (sizeof (a) / sizeof *(a))
+
 size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restrict out, size_t *restrict outb)
 {
 	size_t x=0;
@@ -229,7 +235,7 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 	wchar_t wc;
 	unsigned c, d;
 	size_t k, l;
-	int err;
+	int err, i, j;
 	unsigned char type = map[-1];
 	unsigned char totype = tomap[-1];
 	locale_t *ploc = &CURRENT_LOCALE, loc = *ploc;
@@ -328,7 +334,10 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 			} else if (d-159 <= 252-159) {
 				c++;
 				d -= 159;
+			} else {
+				goto ilseq;
 			}
+			if (c>=84) goto ilseq;
 			c = jis0208[c][d];
 			if (!c) goto ilseq;
 			break;
@@ -392,6 +401,10 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 			if (c < 128) break;
 			if (c < 0xa1) goto ilseq;
 		case GBK:
+			if (c == 128) {
+				c = 0x20ac;
+				break;
+			}
 		case GB18030:
 			if (c < 128) break;
 			c -= 0x81;
@@ -412,15 +425,20 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 				d = *((unsigned char *)*in + 3);
 				if (d-'0'>9) goto ilseq;
 				c += d-'0';
-				c += 128;
-				for (d=0; d<=c; ) {
-					k = 0;
-					for (int i=0; i<126; i++)
-						for (int j=0; j<190; j++)
-							if (gb18030[i][j]-d <= c-d)
-								k++;
-					d = c+1;
-					c += k;
+				if (c >= 189000) {
+					c -= 189000;
+					c += 0x10000;
+					if (c >= 0x110000) goto ilseq;
+					break;
+				}
+				for (i=0; ; i++) {
+					if (i==countof(gb18030utf))
+						goto ilseq;
+					if (c<gb18030utf[i][1]) {
+						c += gb18030utf[i][0];
+						break;
+					}
+					c -= gb18030utf[i][1];
 				}
 				break;
 			}
@@ -481,7 +499,7 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 			if (c >= 93 || d >= 94) {
 				c += (0xa1-0x81);
 				d += 0xa1;
-				if (c >= 93 || c>=0xc6-0x81 && d>0x52)
+				if (c > 0xc6-0x81 || c==0xc6-0x81 && d>0x52)
 					goto ilseq;
 				if (d-'A'<26) d = d-'A';
 				else if (d-'a'<26) d = d-'a'+26;
@@ -492,8 +510,8 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 				c += 0xac00;
 				for (d=0xac00; d<=c; ) {
 					k = 0;
-					for (int i=0; i<93; i++)
-						for (int j=0; j<94; j++)
+					for (i=0; i<93; i++)
+						for (j=0; j<94; j++)
 							if (ksc[i][j]-d <= c-d)
 								k++;
 					d = c+1;
@@ -524,6 +542,7 @@ size_t iconv(iconv_t cd, char **restrict in, size_t *restrict inb, char **restri
 				if (*outb < k) goto toobig;
 				memcpy(*out, tmp, k);
 			} else k = wctomb_utf8(*out, c);
+			if (k>4) goto ilseq;
 			*out += k;
 			*outb -= k;
 			break;

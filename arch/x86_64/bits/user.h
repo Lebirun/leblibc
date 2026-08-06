@@ -1,6 +1,3 @@
-#undef __WORDSIZE
-#define __WORDSIZE 64
-
 typedef struct user_fpregs_struct {
 	unsigned short cwd, swd, ftw, fop;
 	unsigned long rip, rdp;

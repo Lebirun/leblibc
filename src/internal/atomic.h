@@ -195,7 +195,7 @@ static inline void a_store(volatile int *p, int v)
 #ifndef a_barrier
 #define a_barrier a_barrier
 __attribute__((unused))
-static void a_barrier()
+static inline void a_barrier()
 {
 	volatile int tmp = 0;
 	a_cas(&tmp, 0, 0);

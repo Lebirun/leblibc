@@ -3,6 +3,7 @@ __asm__(
 ".weak _DYNAMIC \n"
 ".hidden _DYNAMIC \n"
 ".global " START "\n"
+".type " START ",%function \n"
 START ":\n"
 "	xor %rbp,%rbp \n"
 "	mov %rsp,%rdi \n"

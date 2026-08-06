@@ -1,6 +1,9 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include "libc.h"
+#include "pthread_impl.h"
+#include "atomic.h"
+#include "syscall.h"
 
 static void dummy()
 {
@@ -30,6 +33,12 @@ weak_alias(libc_exit_fini, __libc_exit_fini);
 
 _Noreturn void exit(int code)
 {
+	static volatile int exit_lock[1];
+	int tid =  __pthread_self()->tid;
+	int prev = a_cas(exit_lock, 0, tid);
+	if (prev == tid) a_crash();
+	else if (prev) for (;;) __sys_pause();
+
 	__funcs_on_exit();
 	__libc_exit_fini();
 	__stdio_exit();

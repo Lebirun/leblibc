@@ -1,4 +1,4 @@
-/* Copyright (C) 2011 by Valentin Ochs
+/* Copyright (C) 2011 by Lynn Ochs
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to
@@ -31,10 +31,8 @@
 typedef int (*cmpfun)(const void *, const void *, void *);
 
 static inline int pntz(size_t p[2]) {
-	int r = ntz(p[0] - 1);
-	if(r != 0 || (r = 8*sizeof(size_t) + ntz(p[1])) != 8*sizeof(size_t)) {
-		return r;
-	}
+	if (p[0] != 1) return ntz(p[0] - 1);
+	if (p[1]) return 8*sizeof(size_t) + ntz(p[1]);
 	return 0;
 }
 
@@ -66,6 +64,7 @@ static inline void shl(size_t p[2], int n)
 		n -= 8 * sizeof(size_t);
 		p[1] = p[0];
 		p[0] = 0;
+		if (!n) return;
 	}
 	p[1] <<= n;
 	p[1] |= p[0] >> (sizeof(size_t) * 8 - n);
@@ -78,6 +77,7 @@ static inline void shr(size_t p[2], int n)
 		n -= 8 * sizeof(size_t);
 		p[0] = p[1];
 		p[1] = 0;
+		if (!n) return;
 	}
 	p[0] >>= n;
 	p[0] |= p[1] << (sizeof(size_t) * 8 - n);

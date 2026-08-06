@@ -25,6 +25,45 @@
 
 #define RLIM(x) (-32768|(RLIMIT_ ## x))
 
+static long get_processor_count(void)
+{
+	unsigned char set[128] = {1};
+	int i, count;
+
+	__syscall(SYS_sched_getaffinity, 0, sizeof set, set);
+	for (i=count=0; i<sizeof set; i++)
+		for (; set[i]; set[i]&=set[i]-1, count++);
+	return count;
+}
+
+static long get_page_count(int name)
+{
+	unsigned long long memory;
+	struct sysinfo info;
+
+	__lsysinfo(&info);
+	if (!info.mem_unit) info.mem_unit = 1;
+	if (name==_SC_PHYS_PAGES) memory = info.totalram;
+	else memory = info.freeram + info.bufferram;
+	memory *= info.mem_unit;
+	memory /= PAGE_SIZE;
+	return memory > LONG_MAX ? LONG_MAX : memory;
+}
+
+static long get_signal_stack_size(int value)
+{
+	unsigned long sigframe_size;
+	unsigned stack_size;
+
+	sigframe_size = __getauxval(AT_MINSIGSTKSZ);
+	if (sigframe_size < MINSIGSTKSZ - 1024)
+		sigframe_size = MINSIGSTKSZ - 1024;
+	stack_size = sigframe_size + 1024;
+	if (value == JT_SIGSTKSZ)
+		stack_size += SIGSTKSZ - MINSIGSTKSZ;
+	return stack_size;
+}
+
 long sysconf(int name)
 {
 	static const short values[] = {
@@ -200,31 +239,14 @@ long sysconf(int name)
 	case JT_DELAYTIMER_MAX & 255:
 		return DELAYTIMER_MAX;
 	case JT_NPROCESSORS_CONF & 255:
-	case JT_NPROCESSORS_ONLN & 255: ;
-		unsigned char set[128] = {1};
-		int i, cnt;
-		__syscall(SYS_sched_getaffinity, 0, sizeof set, set);
-		for (i=cnt=0; i<sizeof set; i++)
-			for (; set[i]; set[i]&=set[i]-1, cnt++);
-		return cnt;
+	case JT_NPROCESSORS_ONLN & 255:
+		return get_processor_count();
 	case JT_PHYS_PAGES & 255:
-	case JT_AVPHYS_PAGES & 255: ;
-		unsigned long long mem;
-		struct sysinfo si;
-		__lsysinfo(&si);
-		if (!si.mem_unit) si.mem_unit = 1;
-		if (name==_SC_PHYS_PAGES) mem = si.totalram;
-		else mem = si.freeram + si.bufferram;
-		mem *= si.mem_unit;
-		mem /= PAGE_SIZE;
-		return (mem > LONG_MAX) ? LONG_MAX : mem;
+	case JT_AVPHYS_PAGES & 255:
+		return get_page_count(name);
 	case JT_MINSIGSTKSZ & 255:
-	case JT_SIGSTKSZ & 255: ;
-		long val = __getauxval(AT_MINSIGSTKSZ);
-		if (val < MINSIGSTKSZ) val = MINSIGSTKSZ;
-		if (values[name] == JT_SIGSTKSZ)
-			val += SIGSTKSZ - MINSIGSTKSZ;
-		return val;
+	case JT_SIGSTKSZ & 255:
+		return get_signal_stack_size(values[name]);
 	case JT_ZERO & 255:
 		return 0;
 	}

@@ -24,6 +24,8 @@ static char *unescape_ent(char *beg)
 {
 	char *dest = beg;
 	const char *src = beg;
+	int i;
+
 	while (*src) {
 		const char *val;
 		unsigned char cval = 0;
@@ -37,7 +39,7 @@ static char *unescape_ent(char *beg)
 			continue;
 		}
 		val = src + 1;
-		for (int i = 0; i < 3; ++i) {
+		for (i = 0; i < 3; ++i) {
 			if (*val >= '0' && *val <= '7') {
 				cval <<= 3;
 				cval += *val++ - '0';
@@ -81,7 +83,7 @@ struct mntent *getmntent_r(FILE *f, struct mntent *mnt, char *linebuf, int bufle
 		len = strlen(linebuf);
 		if (len > INT_MAX) continue;
 		for (i = 0; i < sizeof n / sizeof *n; i++) n[i] = len;
-		sscanf(linebuf, " %n%*[^ \t]%n %n%*[^ \t]%n %n%*[^ \t]%n %n%*[^ \t]%n %d %d",
+		sscanf(linebuf, " %n%*[^ \t\n]%n %n%*[^ \t\n]%n %n%*[^ \t\n]%n %n%*[^ \t\n]%n %d %d",
 			n, n+1, n+2, n+3, n+4, n+5, n+6, n+7,
 			&mnt->mnt_freq, &mnt->mnt_passno);
 	} while (linebuf[n[0]] == '#' || n[1]==len);
@@ -115,5 +117,13 @@ int addmntent(FILE *f, const struct mntent *mnt)
 
 char *hasmntopt(const struct mntent *mnt, const char *opt)
 {
-	return strstr(mnt->mnt_opts, opt);
+	size_t l = strlen(opt);
+	char *p = mnt->mnt_opts;
+	for (;;) {
+		if (!strncmp(p, opt, l) && (!p[l] || p[l]==',' || p[l]=='='))
+			return p;
+		p = strchr(p, ',');
+		if (!p) return 0;
+		p++;
+	}
 }

@@ -18,6 +18,7 @@ static struct fl
 	void *a[COUNT];
 } builtin, *head;
 
+static int finished_atexit;
 static int slot;
 static volatile int lock[1];
 volatile int *const __atexit_lockptr = lock;
@@ -33,6 +34,8 @@ void __funcs_on_exit()
 		func(arg);
 		LOCK(lock);
 	}
+	finished_atexit = 1;
+	UNLOCK(lock);
 }
 
 void __cxa_finalize(void *dso)
@@ -42,6 +45,11 @@ void __cxa_finalize(void *dso)
 int __cxa_atexit(void (*func)(void *), void *arg, void *dso)
 {
 	LOCK(lock);
+
+	if (finished_atexit) {
+		UNLOCK(lock);
+		return -1;
+	}
 
 	
 	if (!head) head = &builtin;
