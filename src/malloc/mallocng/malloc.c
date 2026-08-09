@@ -55,28 +55,6 @@ struct meta *alloc_meta(void)
 	if ((m = dequeue_head(&ctx.free_meta_head))) return m;
 	if (!ctx.avail_meta_count) {
 		int need_unprotect = 1;
-		if (!ctx.avail_meta_area_count && ctx.brk!=-1) {
-			uintptr_t new = ctx.brk + pagesize;
-			int need_guard = 0;
-			if (!ctx.brk) {
-				need_guard = 1;
-				ctx.brk = brk(0);
-				
-				
-				ctx.brk += -ctx.brk & (pagesize-1);
-				new = ctx.brk + 2*pagesize;
-			}
-			if (brk(new) != new) {
-				ctx.brk = -1;
-			} else {
-				if (need_guard) mmap((void *)ctx.brk, pagesize,
-					PROT_NONE, MAP_ANON|MAP_PRIVATE|MAP_FIXED, -1, 0);
-				ctx.brk = new;
-				ctx.avail_meta_areas = (void *)(new - pagesize);
-				ctx.avail_meta_area_count = pagesize>>12;
-				need_unprotect = 0;
-			}
-		}
 		if (!ctx.avail_meta_area_count) {
 			size_t n = 2UL << ctx.meta_alloc_shift;
 			p = mmap(0, n*pagesize, PROT_NONE,
@@ -185,6 +163,8 @@ static struct meta *alloc_group(int sc, size_t req)
 		while (i<2 && 4*small_cnt_tab[sc][i] > usage)
 			i++;
 		cnt = small_cnt_tab[sc][i];
+		while (cnt > 2 && 4*cnt > usage)
+			cnt = (cnt+1) >> 1;
 	} else {
 		
 		
@@ -192,8 +172,8 @@ static struct meta *alloc_group(int sc, size_t req)
 		cnt = med_cnt_tab[sc&3];
 
 		
-		while (!(cnt&1) && 4*cnt > usage)
-			cnt >>= 1;
+		while (cnt > 2 && 4*cnt > usage)
+			cnt = (cnt+1) >> 1;
 
 		
 		

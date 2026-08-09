@@ -1,5 +1,5 @@
 __asm__(
-".text\n"
+".section .text._start,\"ax\",@progbits\n"
 ".weak _DYNAMIC \n"
 ".hidden _DYNAMIC \n"
 ".global " START "\n"
