@@ -3,29 +3,41 @@
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "syscall.h"
 
 char *getcwd(char *buf, size_t size)
 {
-	char *tmp = NULL;
+	char *grown;
 	int allocated = 0;
+	long ret;
 	
 	if (!buf) {
-		buf = malloc(PATH_MAX);
+		if (!size) size = 128;
+		buf = malloc(size);
 		if (!buf) {
 			errno = ENOMEM;
 			return NULL;
 		}
-		tmp = buf;
-		size = PATH_MAX;
 		allocated = 1;
 	} else if (!size) {
 		errno = EINVAL;
 		return NULL;
 	}
 	
-	long ret = syscall(SYS_getcwd, buf, size);
+	retry:
+	ret = syscall(SYS_getcwd, buf, size);
 	if (ret < 0) {
+		if (allocated && errno == ERANGE && size <= SIZE_MAX/2) {
+			size *= 2;
+			grown = realloc(buf, size);
+			if (!grown) {
+				free(buf);
+				return NULL;
+			}
+			buf = grown;
+			goto retry;
+		}
 		if (allocated) free(buf);
 		return NULL;
 	}
@@ -37,7 +49,9 @@ char *getcwd(char *buf, size_t size)
 	}
 	
 	if (allocated) {
-		char *result = strdup(buf);
+		char *result;
+
+		result = strdup(buf);
 		free(buf);
 		return result;
 	}

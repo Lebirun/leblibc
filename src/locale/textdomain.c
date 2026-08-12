@@ -13,20 +13,17 @@ char *__gettextdomain()
 
 char *textdomain(const char *domainname)
 {
+	char *new_domain;
+	size_t domlen;
+
 	if (!domainname) return __gettextdomain();
 
-	size_t domlen = strlen(domainname);
-	if (domlen > NAME_MAX) {
-		errno = EINVAL;
-		return 0;
-	}
-
-	if (!current_domain) {
-		current_domain = malloc(NAME_MAX+1);
-		if (!current_domain) return 0;
-	}
-
-	memcpy(current_domain, domainname, domlen+1);
+	domlen = strlen(domainname);
+	new_domain = malloc(domlen+1);
+	if (!new_domain) return 0;
+	memcpy(new_domain, domainname, domlen+1);
+	free(current_domain);
+	current_domain = new_domain;
 
 	return current_domain;
 }

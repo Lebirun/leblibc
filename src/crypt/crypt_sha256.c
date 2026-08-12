@@ -165,15 +165,14 @@ static char *to64(char *s, unsigned int u, int n)
 	return s;
 }
 
-#define KEY_MAX 256
 #define SALT_MAX 16
 #define ROUNDS_DEFAULT 5000
 #define ROUNDS_MIN 1000
 #define ROUNDS_MAX 9999999
 
-static void hashmd(struct sha256 *s, unsigned int n, const void *md)
+static void hashmd(struct sha256 *s, size_t n, const void *md)
 {
-	unsigned int i;
+	size_t i;
 
 	for (i = n; i > 32; i -= 32)
 		sha256_update(s, md, 32);
@@ -184,15 +183,16 @@ static char *sha256crypt(const char *key, const char *setting, char *output)
 {
 	struct sha256 ctx;
 	unsigned char md[32], kmd[32], smd[32];
-	unsigned int i, r, klen, slen;
+	unsigned int i, r, slen;
+	size_t klen, j;
 	char rounds[20] = "";
 	const char *salt;
 	char *p;
+	unsigned long u;
+	char *end;
 
 	
-	klen = strnlen(key, KEY_MAX+1);
-	if (klen > KEY_MAX)
-		return 0;
+	klen = strlen(key);
 
 	
 	if (strncmp(setting, "$5$", 3) != 0)
@@ -201,9 +201,6 @@ static char *sha256crypt(const char *key, const char *setting, char *output)
 
 	r = ROUNDS_DEFAULT;
 	if (strncmp(salt, "rounds=", sizeof "rounds=" - 1) == 0) {
-		unsigned long u;
-		char *end;
-
 		
 		salt += sizeof "rounds=" - 1;
 		if (!isdigit(*salt))
@@ -240,8 +237,8 @@ static char *sha256crypt(const char *key, const char *setting, char *output)
 	sha256_update(&ctx, key, klen);
 	sha256_update(&ctx, salt, slen);
 	hashmd(&ctx, klen, md);
-	for (i = klen; i > 0; i >>= 1)
-		if (i & 1)
+	for (j = klen; j > 0; j >>= 1)
+		if (j & 1)
 			sha256_update(&ctx, md, sizeof md);
 		else
 			sha256_update(&ctx, key, klen);
@@ -249,7 +246,7 @@ static char *sha256crypt(const char *key, const char *setting, char *output)
 
 	
 	sha256_init(&ctx);
-	for (i = 0; i < klen; i++)
+	for (j = 0; j < klen; j++)
 		sha256_update(&ctx, key, klen);
 	sha256_sum(&ctx, kmd);
 

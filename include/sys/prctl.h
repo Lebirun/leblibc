@@ -110,6 +110,8 @@ struct prctl_mm_map {
 
 #define PR_SET_NO_NEW_PRIVS     38
 #define PR_GET_NO_NEW_PRIVS     39
+#define PR_SET_SYSCALL_MASK     0x4C420001
+#define PR_SET_SYSCALL_MASK2    0x4C420002
 
 #define PR_GET_TID_ADDRESS      40
 

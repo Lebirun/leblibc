@@ -147,6 +147,8 @@ hidden void __testcancel();
 hidden void __do_cleanup_push(struct __ptcb *);
 hidden void __do_cleanup_pop(struct __ptcb *);
 hidden void __pthread_tsd_run_dtors();
+hidden void *__pthread_tsd_get(pthread_t, pthread_key_t);
+hidden int __pthread_tsd_set(pthread_t, pthread_key_t, void *);
 
 hidden void __pthread_key_delete_synccall(void (*)(void *), void *);
 hidden int __pthread_key_delete_impl(pthread_key_t);
@@ -189,14 +191,11 @@ extern hidden volatile int __thread_list_lock;
 
 extern hidden volatile int __abort_lock[1];
 
-extern hidden unsigned __default_stacksize;
-extern hidden unsigned __default_guardsize;
+extern hidden size_t __default_stacksize;
+extern hidden size_t __default_guardsize;
 
 #define DEFAULT_STACK_SIZE 131072
 #define DEFAULT_GUARD_SIZE 8192
-
-#define DEFAULT_STACK_MAX (8<<20)
-#define DEFAULT_GUARD_MAX (1<<20)
 
 #define __ATTRP_C11_THREAD ((void*)(uintptr_t)-1)
 

@@ -6,22 +6,20 @@
 #include <stdlib.h>
 #include "syscall.h"
 
-#define MAXTRIES 100
-
 char *tmpnam(char *buf)
 {
 	static char internal[L_tmpnam];
 	char s[] = "/tmp/tmpnam_XXXXXX";
-	int try;
+	char probe;
 	int r;
-	for (try=0; try<MAXTRIES; try++) {
+	for (;;) {
 		__randname(s+12);
 #ifdef SYS_readlink
-		r = __syscall(SYS_readlink, s, (char[1]){0}, 1);
+		r = __syscall(SYS_readlink, s, &probe, 1);
 #else
-		r = __syscall(SYS_readlinkat, AT_FDCWD, s, (char[1]){0}, 1);
+		r = __syscall(SYS_readlinkat, AT_FDCWD, s, &probe, 1);
 #endif
 		if (r == -ENOENT) return strcpy(buf ? buf : internal, s);
+		if (r < 0 && r != -EINVAL) return 0;
 	}
-	return 0;
 }

@@ -9,12 +9,14 @@
 #include <pthread.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <stdlib.h>
+#include <stdint.h>
 #include "lock.h"
 #include "fork_impl.h"
 #include "locale_impl.h"
 
 static volatile int lock[1];
-static char log_ident[32];
+static char *log_ident;
 static int log_opt;
 static int log_facility = LOG_USER;
 static int log_mask = 0xff;
@@ -23,8 +25,10 @@ volatile int *const __syslog_lockptr = lock;
 
 int setlogmask(int maskpri)
 {
+	int ret;
+
 	LOCK(lock);
-	int ret = log_mask;
+	ret = log_mask;
 	if (maskpri) log_mask = maskpri;
 	UNLOCK(lock);
 	return ret;
@@ -58,15 +62,15 @@ static void __openlog()
 void openlog(const char *ident, int opt, int facility)
 {
 	int cs;
+	char *new_ident;
+
+	new_ident = ident ? strdup(ident) : 0;
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
 	LOCK(lock);
 
-	if (ident) {
-		size_t n = strnlen(ident, sizeof log_ident - 1);
-		memcpy(log_ident, ident, n);
-		log_ident[n] = 0;
-	} else {
-		log_ident[0] = 0;
+	if (!ident || new_ident) {
+		free(log_ident);
+		log_ident = new_ident;
 	}
 	log_opt = opt;
 	log_facility = facility;
@@ -85,14 +89,21 @@ static int is_lost_conn(int e)
 static void _vsyslog(int priority, const char *message, va_list ap)
 {
 	char timebuf[16];
+	char inline_buf[1024];
 	time_t now;
 	struct tm tm;
-	char buf[1024];
+	char *buf;
+	const char *ident;
+	va_list aq;
 	int errno_save = errno;
 	int pid;
-	int l, l2;
+	int header_len;
+	int message_len;
+	int l;
 	int hlen;
 	int fd;
+	size_t needed;
+	int allocated;
 
 	if (log_fd < 0) __openlog();
 
@@ -103,14 +114,32 @@ static void _vsyslog(int priority, const char *message, va_list ap)
 	strftime_l(timebuf, sizeof timebuf, "%b %e %T", &tm, C_LOCALE);
 
 	pid = (log_opt & LOG_PID) ? getpid() : 0;
-	l = snprintf(buf, sizeof buf, "<%d>%s %n%s%s%.0d%s: ",
-		priority, timebuf, &hlen, log_ident, "["+!pid, pid, "]"+!pid);
+	ident = log_ident ? log_ident : "";
+	header_len = snprintf(0, 0, "<%d>%s %n%s%s%.0d%s: ",
+		priority, timebuf, &hlen, ident, "["+!pid, pid, "]"+!pid);
+	if (header_len < 0) return;
 	errno = errno_save;
-	l2 = vsnprintf(buf+l, sizeof buf - l, message, ap);
-	if (l2 >= 0) {
-		if (l2 >= sizeof buf - l) l = sizeof buf - 1;
-		else l += l2;
-		if (buf[l-1] != '\n') buf[l++] = '\n';
+	va_copy(aq, ap);
+	message_len = vsnprintf(0, 0, message, aq);
+	va_end(aq);
+	if (message_len >= 0) {
+		if ((size_t)header_len > SIZE_MAX-(size_t)message_len-2) return;
+		needed = (size_t)header_len+(size_t)message_len+2;
+		allocated = needed > sizeof inline_buf;
+		buf = allocated ? malloc(needed) : inline_buf;
+		if (!buf) return;
+		l = snprintf(buf, needed, "<%d>%s %n%s%s%.0d%s: ",
+			priority, timebuf, &hlen, ident, "["+!pid, pid, "]"+!pid);
+		errno = errno_save;
+		va_copy(aq, ap);
+		message_len = vsnprintf(buf+l, needed-(size_t)l, message, aq);
+		va_end(aq);
+		if (message_len < 0) {
+			if (allocated) free(buf);
+			return;
+		}
+		l += message_len;
+		if (l == 0 || buf[l-1] != '\n') buf[l++] = '\n';
 		if (send(log_fd, buf, l, 0) < 0 && (!is_lost_conn(errno)
 		    || connect(log_fd, (void *)&log_addr, sizeof log_addr) < 0
 		    || send(log_fd, buf, l, 0) < 0)
@@ -122,6 +151,7 @@ static void _vsyslog(int priority, const char *message, va_list ap)
 			}
 		}
 		if (log_opt & LOG_PERROR) dprintf(2, "%.*s", l-hlen, buf+hlen);
+		if (allocated) free(buf);
 	}
 }
 

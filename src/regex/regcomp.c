@@ -195,12 +195,12 @@ tre_ast_new_catenation(tre_mem_t mem, tre_ast_node_t *left, tre_ast_node_t *righ
 typedef struct tre_stack_rec tre_stack_t;
 
 static tre_stack_t *
-tre_stack_new(int size, int max_size, int increment);
+tre_stack_new(size_t size, size_t increment);
 
 static void
 tre_stack_destroy(tre_stack_t *s);
 
-static int
+static size_t
 tre_stack_num_objects(tre_stack_t *s);
 
 #define declare_pushf(typetag, type)					      \
@@ -243,18 +243,19 @@ union tre_stack_item {
 };
 
 struct tre_stack_rec {
-  int size;
-  int max_size;
-  int increment;
-  int ptr;
+  size_t size;
+  size_t increment;
+  size_t ptr;
   union tre_stack_item *stack;
 };
 
 static tre_stack_t *
-tre_stack_new(int size, int max_size, int increment)
+tre_stack_new(size_t size, size_t increment)
 {
   tre_stack_t *s;
 
+  if (!size || size > SIZE_MAX / sizeof(*s->stack))
+    return NULL;
   s = xmalloc(sizeof(*s));
   if (s != NULL)
     {
@@ -263,9 +264,8 @@ tre_stack_new(int size, int max_size, int increment)
 	{
 	  xfree(s);
 	  return NULL;
-	}
+      }
       s->size = size;
-      s->max_size = max_size;
       s->increment = increment;
       s->ptr = 0;
     }
@@ -279,7 +279,7 @@ tre_stack_destroy(tre_stack_t *s)
   xfree(s);
 }
 
-static int
+static size_t
 tre_stack_num_objects(tre_stack_t *s)
 {
   return s->ptr;
@@ -288,6 +288,9 @@ tre_stack_num_objects(tre_stack_t *s)
 static reg_errcode_t
 tre_stack_push(tre_stack_t *s, union tre_stack_item value)
 {
+  union tre_stack_item *new_buffer;
+  size_t new_size;
+
   if (s->ptr < s->size)
     {
       s->stack[s->ptr] = value;
@@ -295,27 +298,18 @@ tre_stack_push(tre_stack_t *s, union tre_stack_item value)
     }
   else
     {
-      if (s->size >= s->max_size)
-	{
-	  return REG_ESPACE;
-	}
-      else
-	{
-	  union tre_stack_item *new_buffer;
-	  int new_size;
-	  new_size = s->size + s->increment;
-	  if (new_size > s->max_size)
-	    new_size = s->max_size;
-	  new_buffer = xrealloc(s->stack, sizeof(*new_buffer) * new_size);
-	  if (new_buffer == NULL)
-	    {
-	      return REG_ESPACE;
-	    }
-	  assert(new_size > s->size);
-	  s->size = new_size;
-	  s->stack = new_buffer;
-	  tre_stack_push(s, value);
-	}
+      if (!s->increment || s->size > SIZE_MAX - s->increment)
+       return REG_ESPACE;
+      new_size = s->size + s->increment;
+      if (new_size > SIZE_MAX / sizeof(*new_buffer))
+       return REG_ESPACE;
+      new_buffer = xrealloc(s->stack, sizeof(*new_buffer) * new_size);
+      if (new_buffer == NULL)
+       return REG_ESPACE;
+      assert(new_size > s->size);
+      s->size = new_size;
+      s->stack = new_buffer;
+      s->stack[s->ptr++] = value;
     }
   return REG_OK;
 }
@@ -389,15 +383,16 @@ tre_compare_lit(const void *a, const void *b)
 struct literals {
 	tre_mem_t mem;
 	tre_literal_t **a;
-	int len;
-	int cap;
+	size_t len;
+	size_t cap;
 };
 
 static tre_literal_t *tre_new_lit(struct literals *p)
 {
 	tre_literal_t **a;
 	if (p->len >= p->cap) {
-		if (p->cap >= 1<<15)
+		if (p->cap > SIZE_MAX / 2 ||
+		    p->cap * 2 > SIZE_MAX / sizeof *p->a)
 			return 0;
 		p->cap *= 2;
 		a = xrealloc(p->a, p->cap * sizeof *p->a);
@@ -438,12 +433,11 @@ static int add_icase_literals(struct literals *ls, int min, int max)
 	return 0;
 }
 
-#define MAX_NEG_CLASSES 64
-
 struct neg {
 	int negate;
-	int len;
-	tre_ctype_t a[MAX_NEG_CLASSES];
+	size_t len;
+	size_t cap;
+	tre_ctype_t *a;
 };
 
 static reg_errcode_t parse_bracket_terms(tre_parse_ctx_t *ctx, const char *s, struct literals *ls, struct neg *neg)
@@ -453,6 +447,8 @@ static reg_errcode_t parse_bracket_terms(tre_parse_ctx_t *ctx, const char *s, st
 	int min, max;
 	wchar_t wc;
 	int len;
+	tre_ctype_t *classes;
+	size_t capacity;
 
 	for (;;) {
 		class = 0;
@@ -501,8 +497,19 @@ static reg_errcode_t parse_bracket_terms(tre_parse_ctx_t *ctx, const char *s, st
 		}
 
 		if (class && neg->negate) {
-			if (neg->len >= MAX_NEG_CLASSES)
-				return REG_ESPACE;
+			if (neg->len == neg->cap) {
+				if (neg->cap > SIZE_MAX / 2)
+					return REG_ESPACE;
+				capacity = neg->cap ? neg->cap * 2 : 4;
+				if (capacity > SIZE_MAX / sizeof(*classes))
+					return REG_ESPACE;
+				classes = xrealloc(neg->a,
+				                   capacity * sizeof(*classes));
+				if (!classes)
+					return REG_ESPACE;
+				neg->a = classes;
+				neg->cap = capacity;
+			}
 			neg->a[neg->len++] = class;
 		} else  {
 			tre_literal_t *lit = tre_new_lit(ls);
@@ -523,7 +530,8 @@ static reg_errcode_t parse_bracket_terms(tre_parse_ctx_t *ctx, const char *s, st
 
 static reg_errcode_t parse_bracket(tre_parse_ctx_t *ctx, const char *s)
 {
-	int i, max, min, negmax, negmin;
+	size_t i;
+	int max, min, negmax, negmin;
 	tre_ast_node_t *node = 0, *n;
 	tre_ctype_t *nc = 0;
 	tre_literal_t *lit;
@@ -538,6 +546,8 @@ static reg_errcode_t parse_bracket(tre_parse_ctx_t *ctx, const char *s)
 	if (!ls.a)
 		return REG_ESPACE;
 	neg.len = 0;
+	neg.cap = 0;
+	neg.a = 0;
 	neg.negate = *s == '^';
 	if (neg.negate)
 		s++;
@@ -571,6 +581,10 @@ static reg_errcode_t parse_bracket(tre_parse_ctx_t *ctx, const char *s)
 		lit->position = -1;
 		
 		if (neg.len) {
+			if (neg.len > SIZE_MAX / sizeof *neg.a - 1) {
+				err = REG_ESPACE;
+				goto parse_bracket_done;
+			}
 			nc = tre_mem_alloc(ctx->mem, (neg.len+1)*sizeof *neg.a);
 			if (!nc) {
 				err = REG_ESPACE;
@@ -609,6 +623,7 @@ static reg_errcode_t parse_bracket(tre_parse_ctx_t *ctx, const char *s)
 	}
 
 parse_bracket_done:
+	xfree(neg.a);
 	xfree(ls.a);
 	ctx->position++;
 	ctx->n = node;
@@ -1061,7 +1076,7 @@ tre_add_tags(tre_mem_t mem, tre_stack_t *stack, tre_ast_node_t *tree,
   reg_errcode_t status = REG_OK;
   tre_addtags_symbol_t symbol;
   tre_ast_node_t *node = tree; 
-  int bottom = tre_stack_num_objects(stack);
+  size_t bottom = tre_stack_num_objects(stack);
   
   int first_pass = (mem == NULL || tnfa == NULL);
   int *regset, *orig_regset;
@@ -1523,7 +1538,7 @@ tre_copy_ast(tre_mem_t mem, tre_stack_t *stack, tre_ast_node_t *ast,
 	     tre_ast_node_t **copy, int *max_pos)
 {
   reg_errcode_t status = REG_OK;
-  int bottom = tre_stack_num_objects(stack);
+  size_t bottom = tre_stack_num_objects(stack);
   int num_copied = 0;
   int first_tag = 1;
   tre_ast_node_t **result = copy;
@@ -1666,7 +1681,7 @@ tre_expand_ast(tre_mem_t mem, tre_stack_t *stack, tre_ast_node_t *ast,
 	       int *position, tre_tag_direction_t *tag_directions)
 {
   reg_errcode_t status = REG_OK;
-  int bottom = tre_stack_num_objects(stack);
+  size_t bottom = tre_stack_num_objects(stack);
   int pos_add = 0;
   int pos_add_total = 0;
   int max_pos = 0;
@@ -1960,7 +1975,7 @@ tre_match_empty(tre_stack_t *stack, tre_ast_node_t *node, int *tags,
   tre_catenation_t *cat;
   tre_iteration_t *iter;
   int i;
-  int bottom = tre_stack_num_objects(stack);
+  size_t bottom = tre_stack_num_objects(stack);
   reg_errcode_t status = REG_OK;
   if (num_tags_seen)
     *num_tags_seen = 0;
@@ -2057,7 +2072,7 @@ typedef enum {
 static reg_errcode_t
 tre_compute_nfl(tre_mem_t mem, tre_stack_t *stack, tre_ast_node_t *tree)
 {
-  int bottom = tre_stack_num_objects(stack);
+  size_t bottom = tre_stack_num_objects(stack);
 
   STACK_PUSHR(stack, voidptr, tree);
   STACK_PUSHR(stack, int, NFL_RECURSE);
@@ -2486,7 +2501,7 @@ regcomp(regex_t *restrict preg, const char *restrict regex, int cflags)
   tre_parse_ctx_t parse_ctx;
 
   
-  stack = tre_stack_new(512, 1024000, 128);
+  stack = tre_stack_new(512, 128);
   if (!stack)
     return REG_ESPACE;
   

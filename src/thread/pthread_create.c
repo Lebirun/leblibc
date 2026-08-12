@@ -189,8 +189,6 @@ static int start_c11(void *p)
 	return 0;
 }
 
-#define ROUND(x) (((x)+PAGE_SIZE-1)&-PAGE_SIZE)
-
 static volatile size_t dummy = 0;
 weak_alias(dummy, __pthread_tsd_size);
 static void *dummy_tsd[1] = { 0 };
@@ -206,23 +204,76 @@ static void init_file_lock(FILE *f)
 	if (f && f->lock<0) f->lock = 0;
 }
 
+static int round_page_size(size_t value, size_t *result)
+{
+	size_t page_size;
+	size_t remainder;
+	size_t addition;
+
+	page_size = PAGE_SIZE;
+	if (!page_size) return -1;
+	remainder = value % page_size;
+	if (!remainder) {
+		*result = value;
+		return 0;
+	}
+	addition = page_size - remainder;
+	if (value > SIZE_MAX-addition) return -1;
+	*result = value + addition;
+	return 0;
+}
+
 int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict attrp, void *(*entry)(void *), void *restrict arg)
 {
-	int ret, c11 = (attrp == __ATTRP_C11_THREAD);
-	size_t size, guard;
-	struct pthread *self, *new;
-	unsigned char *map = 0, *stack = 0, *tsd = 0, *stack_limit;
-	unsigned flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND
+	int ret;
+	int c11;
+	int mapped;
+	int inline_tsd;
+	size_t size;
+	size_t guard;
+	size_t need;
+	size_t rounded;
+	size_t tsd_size;
+	size_t map_address;
+	size_t stack_address;
+	size_t stack_limit_address;
+	struct pthread *self;
+	struct pthread *new;
+	unsigned char *map;
+	unsigned char *stack;
+	unsigned char *tsd;
+	unsigned char *stack_limit;
+	unsigned flags;
+	pthread_attr_t attr;
+	sigset_t set;
+	FILE *file;
+	struct start_args *args;
+
+	c11 = attrp == __ATTRP_C11_THREAD;
+	mapped = 0;
+	inline_tsd = 0;
+	size = 0;
+	guard = 0;
+	need = 0;
+	rounded = 0;
+	tsd_size = 0;
+	map_address = 0;
+	stack_address = 0;
+	stack_limit_address = 0;
+	map = 0;
+	stack = 0;
+	tsd = 0;
+	stack_limit = 0;
+	flags = CLONE_VM | CLONE_FS | CLONE_FILES | CLONE_SIGHAND
 		| CLONE_THREAD | CLONE_SYSVSEM | CLONE_SETTLS
 		| CLONE_PARENT_SETTID | CLONE_CHILD_CLEARTID | CLONE_DETACHED;
-	pthread_attr_t attr = { 0 };
-	sigset_t set;
+	attr = (pthread_attr_t){ 0 };
 
 	if (!libc.can_do_threads) return ENOSYS;
 	self = __pthread_self();
 	if (!libc.threaded) {
-		for (FILE *f=*__ofl_lock(); f; f=f->next)
-			init_file_lock(f);
+		for (file=*__ofl_lock(); file; file=file->next)
+			init_file_lock(file);
 		__ofl_unlock();
 		init_file_lock(__stdin_used);
 		init_file_lock(__stdout_used);
@@ -239,52 +290,77 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 		attr._a_stacksize = __default_stacksize;
 		attr._a_guardsize = __default_guardsize;
 	}
+	tsd_size = __pthread_tsd_size;
+	if (libc.tls_size > SIZE_MAX-tsd_size) goto fail;
+	need = libc.tls_size + tsd_size;
 
 	if (attr._a_stackaddr) {
-		size_t need = libc.tls_size + __pthread_tsd_size;
 		size = attr._a_stacksize;
-		stack = (void *)(attr._a_stackaddr & -16);
-		stack_limit = (void *)(attr._a_stackaddr - size);
-		
-		if (need < size/8 && need < 2048) {
-			tsd = stack - __pthread_tsd_size;
-			stack = tsd - libc.tls_size;
+		if (attr._a_stackaddr < size) goto fail;
+		stack_address = attr._a_stackaddr & ~(size_t)15;
+		stack_limit_address = attr._a_stackaddr - size;
+		if (stack_address < stack_limit_address) goto fail;
+		stack = (void *)stack_address;
+		stack_limit = (void *)stack_limit_address;
+		if (need < size/8 && need < 2048 &&
+		    stack_address-stack_limit_address >= need) {
+			rounded = stack_address - need;
+			rounded -= rounded % sizeof(uintptr_t);
+			if (rounded >= stack_limit_address &&
+			    rounded-stack_limit_address >= sizeof(struct start_args))
+				inline_tsd = 1;
+		}
+		if (inline_tsd) {
+			tsd = (void *)(stack_address-tsd_size);
+			stack_address -= need;
+			stack = (void *)stack_address;
 			memset(stack, 0, need);
 		} else {
-			size = ROUND(need);
+			if (round_page_size(need, &size)) goto fail;
 		}
 		guard = 0;
 	} else {
-		guard = ROUND(attr._a_guardsize);
-		size = guard + ROUND(attr._a_stacksize
-			+ libc.tls_size +  __pthread_tsd_size);
+		if (round_page_size(attr._a_guardsize, &guard)) goto fail;
+		if (attr._a_stacksize > SIZE_MAX-need) goto fail;
+		need += attr._a_stacksize;
+		if (round_page_size(need, &rounded)) goto fail;
+		if (guard > SIZE_MAX-rounded) goto fail;
+		size = guard + rounded;
 	}
 
 	if (!tsd) {
 		if (guard) {
 			map = __mmap(0, size, PROT_NONE, MAP_PRIVATE|MAP_ANON, -1, 0);
 			if (map == MAP_FAILED) goto fail;
-			if (__mprotect(map+guard, size-guard, PROT_READ|PROT_WRITE)
-			    && errno != ENOSYS) {
-				__munmap(map, size);
-				goto fail;
-			}
+			mapped = 1;
 		} else {
 			map = __mmap(0, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANON, -1, 0);
 			if (map == MAP_FAILED) goto fail;
+			mapped = 1;
 		}
-		tsd = map + size - __pthread_tsd_size;
+		map_address = (size_t)map;
+		if (map_address > SIZE_MAX-size) goto fail;
+		if (guard && __mprotect((void *)(map_address+guard), size-guard,
+		    PROT_READ|PROT_WRITE) && errno != ENOSYS) goto fail;
+		tsd = (void *)(map_address+size-tsd_size);
 		if (!stack) {
-			stack = tsd - libc.tls_size;
-			stack_limit = map + guard;
+			stack = (void *)((size_t)tsd-libc.tls_size);
+			stack_limit = (void *)(map_address+guard);
 		}
 	}
 
-	new = __copy_tls(tsd - libc.tls_size);
+	stack_address = (size_t)stack;
+	stack_limit_address = (size_t)stack_limit;
+	if (stack_address < stack_limit_address) goto fail;
+	rounded = stack_address-stack_address%sizeof(uintptr_t);
+	if (rounded < stack_limit_address ||
+	    rounded-stack_limit_address < sizeof(struct start_args)) goto fail;
+
+	new = __copy_tls((void *)((size_t)tsd-libc.tls_size));
 	new->map_base = map;
 	new->map_size = size;
 	new->stack = stack;
-	new->stack_size = stack - stack_limit;
+	new->stack_size = stack_address-stack_limit_address;
 	new->guard_size = guard;
 	new->self = new;
 	new->tsd = (void *)tsd;
@@ -298,10 +374,9 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 	new->canary = self->canary;
 	new->sysinfo = self->sysinfo;
 
-	
-	stack -= (uintptr_t)stack % sizeof(uintptr_t);
-	stack -= sizeof(struct start_args);
-	struct start_args *args = (void *)stack;
+	stack_address = rounded - sizeof(struct start_args);
+	stack = (void *)stack_address;
+	args = (void *)stack;
 	args->start_func = entry;
 	args->start_arg = arg;
 	args->control = attr._a_sched ? 1 : 0;
@@ -343,13 +418,14 @@ int __pthread_create(pthread_t *restrict res, const pthread_attr_t *restrict att
 	__release_ptc();
 
 	if (ret < 0) {
-		if (map) __munmap(map, size);
+		if (mapped) __munmap(map, size);
 		return -ret;
 	}
 
 	*res = new;
 	return 0;
 fail:
+	if (mapped) __munmap(map, size);
 	__release_ptc();
 	return EAGAIN;
 }

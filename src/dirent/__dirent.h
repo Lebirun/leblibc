@@ -5,6 +5,6 @@ struct __dirstream
 	int buf_pos;
 	int buf_end;
 	volatile int lock[1];
-	
-	char buf[2048];
+	size_t buf_capacity;
+	char *buf;
 };

@@ -1,17 +1,15 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <stdlib.h>
+#include <errno.h>
 #include "stdio_impl.h"
-
-#define MAXTRIES 100
 
 FILE *tmpfile(void)
 {
 	char s[] = "/tmp/tmpfile_XXXXXX";
 	int fd;
 	FILE *f;
-	int try;
-	for (try=0; try<MAXTRIES; try++) {
+	for (;;) {
 		__randname(s+13);
 		fd = sys_open(s, O_RDWR|O_CREAT|O_EXCL, 0600);
 		if (fd >= 0) {
@@ -24,6 +22,6 @@ FILE *tmpfile(void)
 			if (!f) __syscall(SYS_close, fd);
 			return f;
 		}
+		if (fd != -EEXIST) return 0;
 	}
-	return 0;
 }

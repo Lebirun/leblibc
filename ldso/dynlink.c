@@ -128,7 +128,6 @@ static struct builtin_tls {
 } builtin_tls[1];
 #define MIN_TLS_ALIGN offsetof(struct builtin_tls, pt)
 
-#define ADDEND_LIMIT 4096
 static size_t *saved_addends, *apply_addends_to;
 
 static struct dso ldso;
@@ -723,9 +722,7 @@ static void *map_library(int fd, struct dso *dso)
 			dso->relro_end = (ph->p_vaddr + ph->p_memsz) & -PAGE_SIZE;
 		} else if (ph->p_type == PT_GNU_STACK) {
 			if (!runtime && ph->p_memsz > __default_stacksize) {
-				__default_stacksize =
-					ph->p_memsz < DEFAULT_STACK_MAX ?
-					ph->p_memsz : DEFAULT_STACK_MAX;
+				__default_stacksize = ph->p_memsz;
 			}
 		}
 		if (ph->p_type != PT_LOAD) continue;
@@ -1401,9 +1398,7 @@ static void kernel_mapped_dso(struct dso *p)
 			p->relro_end = (ph->p_vaddr + ph->p_memsz) & -PAGE_SIZE;
 		} else if (ph->p_type == PT_GNU_STACK) {
 			if (!runtime && ph->p_memsz > __default_stacksize) {
-				__default_stacksize =
-					ph->p_memsz < DEFAULT_STACK_MAX ?
-					ph->p_memsz : DEFAULT_STACK_MAX;
+				__default_stacksize = ph->p_memsz;
 			}
 		}
 		if (ph->p_type != PT_LOAD) continue;
@@ -1642,13 +1637,26 @@ static void install_new_tls(void)
 hidden void __dls2(unsigned char *base, size_t *sp)
 {
 	size_t *auxv;
+	void *p1;
+	void *p2;
+	size_t aux[AUX_CNT];
+	Ehdr *ehdr;
+	size_t dyn[DYN_CNT];
+	size_t *rel;
+	size_t rel_size;
+	size_t symbolic_rel_cnt;
+	size_t inline_addends[64];
+	size_t addends_size;
+	size_t *addends;
+	int mapped_addends;
+	struct symdef dls2b_def;
+
 	for (auxv=sp+1+*sp+1; *auxv; auxv++);
 	auxv++;
 	if (DL_FDPIC) {
-		void *p1 = (void *)sp[-2];
-		void *p2 = (void *)sp[-1];
+		p1 = (void *)sp[-2];
+		p2 = (void *)sp[-1];
 		if (!p1) {
-			size_t aux[AUX_CNT];
 			decode_vec(auxv, aux, AUX_CNT);
 			if (aux[AT_BASE]) ldso.base = (void *)aux[AT_BASE];
 			else ldso.base = (void *)(aux[AT_PHDR] & -4096);
@@ -1659,7 +1667,7 @@ hidden void __dls2(unsigned char *base, size_t *sp)
 	} else {
 		ldso.base = base;
 	}
-	Ehdr *ehdr = __ehdr_start ? (void *)__ehdr_start : (void *)ldso.base;
+	ehdr = __ehdr_start ? (void *)__ehdr_start : (void *)ldso.base;
 	ldso.name = ldso.shortname = "libc.so";
 	ldso.phnum = ehdr->e_phnum;
 	ldso.phdr = laddr(&ldso, ehdr->e_phoff);
@@ -1671,25 +1679,33 @@ hidden void __dls2(unsigned char *base, size_t *sp)
 	if (DL_FDPIC) makefuncdescs(&ldso);
 
 	
-	size_t dyn[DYN_CNT];
 	decode_vec(ldso.dynv, dyn, DYN_CNT);
-	size_t *rel = laddr(&ldso, dyn[DT_REL]);
-	size_t rel_size = dyn[DT_RELSZ];
-	size_t symbolic_rel_cnt = 0;
+	rel = laddr(&ldso, dyn[DT_REL]);
+	rel_size = dyn[DT_RELSZ];
+	symbolic_rel_cnt = 0;
 	apply_addends_to = rel;
 	for (; rel_size; rel+=2, rel_size-=2*sizeof(size_t))
 		if (!IS_RELATIVE(rel[1], ldso.syms)) symbolic_rel_cnt++;
-	if (symbolic_rel_cnt >= ADDEND_LIMIT) a_crash();
-	size_t addends[symbolic_rel_cnt+1];
+	if (symbolic_rel_cnt == SIZE_MAX ||
+	    symbolic_rel_cnt+1 > SIZE_MAX/sizeof(size_t)) a_crash();
+	addends_size = (symbolic_rel_cnt+1)*sizeof(size_t);
+	mapped_addends = symbolic_rel_cnt+1 >
+		sizeof inline_addends/sizeof inline_addends[0];
+	addends = mapped_addends ? dl_mmap(addends_size) : inline_addends;
+	if (!addends) a_crash();
 	saved_addends = addends;
 
 	head = &ldso;
 	reloc_all(&ldso);
+	if (mapped_addends)
+		__syscall(SYS_munmap, addends, addends_size);
+	saved_addends = 0;
+	apply_addends_to = 0;
 
 	ldso.relocated = 0;
 
 	
-	struct symdef dls2b_def = find_sym(&ldso, "__dls2b", 0);
+	dls2b_def = find_sym(&ldso, "__dls2b", 0);
 	if (DL_FDPIC) ((stage3_func)&ldso.funcdescs[dls2b_def.sym-ldso.syms])(sp, auxv);
 	else ((stage3_func)laddr(&ldso, dls2b_def.sym->st_value))(sp, auxv);
 }

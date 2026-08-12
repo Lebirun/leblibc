@@ -9,7 +9,6 @@ int sendmmsg(int fd, struct mmsghdr *msgvec, unsigned int vlen, unsigned int fla
 #if LONG_MAX > INT_MAX
 	
 	int i;
-	if (vlen > IOV_MAX) vlen = IOV_MAX; 
 	if (!vlen) return 0;
 	for (i=0; i<vlen; i++) {
 		

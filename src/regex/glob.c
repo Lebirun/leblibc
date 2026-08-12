@@ -10,12 +10,34 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <stdint.h>
 
 struct match
 {
 	struct match *next;
 	char name[];
 };
+
+static int reserve_path(char **buf, size_t *capacity, size_t need)
+{
+	char *grown;
+	size_t next;
+
+	if (need <= *capacity) return 0;
+	next = *capacity ? *capacity : 64;
+	while (next < need) {
+		if (next > SIZE_MAX/2) {
+			next = need;
+			break;
+		}
+		next *= 2;
+	}
+	grown = realloc(*buf, next);
+	if (!grown) return -1;
+	*buf = grown;
+	*capacity = next;
+	return 0;
+}
 
 static int append(struct match **tail, const char *name, size_t len, int mark)
 {
@@ -32,21 +54,43 @@ static int append(struct match **tail, const char *name, size_t len, int mark)
 	return 0;
 }
 
-static int do_glob(char *buf, size_t pos, int type, char *pat, int flags, int (*errfunc)(const char *path, int err), struct match **tail)
+static int do_glob(char **bufp, size_t *capacity, size_t pos, int type,
+	char *pat, int flags, int (*errfunc)(const char *path, int err),
+	struct match **tail)
 {
+	char *buf;
+	ptrdiff_t i, j;
+	int in_bracket;
+	char *p2;
+	char saved_sep;
+	DIR *dir;
+	int old_errno;
+	struct dirent *de;
+	size_t l;
+	int fnm_flags;
+	int r;
+	int readerr;
+	struct stat st;
+	char *p;
+
+	buf = *bufp;
 	
 	if (!type && !(flags & GLOB_MARK)) type = DT_REG;
 
 	
 	if (*pat && type!=DT_DIR) type = 0;
-	while (pos+1 < PATH_MAX && *pat=='/') buf[pos++] = *pat++;
+	while (*pat=='/') {
+		if (reserve_path(bufp, capacity, pos+2)) return GLOB_NOSPACE;
+		buf = *bufp;
+		buf[pos++] = *pat++;
+	}
 
 	
-	ptrdiff_t i=0, j=0;
-	int in_bracket = 0, overflow = 0;
+	i = 0;
+	j = 0;
+	in_bracket = 0;
 	for (; pat[i]!='*' && pat[i]!='?' && (!in_bracket || pat[i]!=']'); i++) {
 		if (!pat[i]) {
-			if (overflow) return 0;
 			pat += i;
 			pos += j;
 			i = j = 0;
@@ -61,7 +105,6 @@ static int do_glob(char *buf, size_t pos, int type, char *pat, int flags, int (*
 			i++;
 		}
 		if (pat[i] == '/') {
-			if (overflow) return 0;
 			in_bracket = 0;
 			pat += i+1;
 			i = -1;
@@ -69,20 +112,17 @@ static int do_glob(char *buf, size_t pos, int type, char *pat, int flags, int (*
 			j = -1;
 		}
 		
-		if (pos+(j+1) < PATH_MAX) {
-			buf[pos+j++] = pat[i];
-		} else if (in_bracket) {
-			overflow = 1;
-		} else {
-			return 0;
-		}
+		if ((size_t)j > SIZE_MAX-pos-2) return GLOB_NOSPACE;
+		if (reserve_path(bufp, capacity, pos+(size_t)j+2))
+			return GLOB_NOSPACE;
+		buf = *bufp;
+		buf[pos+j++] = pat[i];
 		
 		type = 0;
 	}
 	buf[pos] = 0;
 	if (!*pat) {
 		
-		struct stat st;
 		if ((flags & GLOB_MARK) && (!type||type==DT_LNK) && !stat(buf, &st)) {
 			if (S_ISDIR(st.st_mode)) type = DT_DIR;
 			else type = DT_REG;
@@ -96,35 +136,39 @@ static int do_glob(char *buf, size_t pos, int type, char *pat, int flags, int (*
 			return GLOB_NOSPACE;
 		return 0;
 	}
-	char *p2 = strchr(pat, '/'), saved_sep = '/';
+	p2 = strchr(pat, '/');
+	saved_sep = '/';
 	
 	if (p2 && !(flags & GLOB_NOESCAPE)) {
-		char *p;
 		for (p=p2; p>pat && p[-1]=='\\'; p--);
 		if ((p2-p)%2) {
 			p2--;
 			saved_sep = '\\';
 		}
 	}
-	DIR *dir = opendir(pos ? buf : ".");
+	dir = opendir(pos ? buf : ".");
 	if (!dir) {
 		if (errfunc(buf, errno) || (flags & GLOB_ERR))
 			return GLOB_ABORTED;
 		return 0;
 	}
-	int old_errno = errno;
-	struct dirent *de;
+	old_errno = errno;
 	while (errno=0, de=readdir(dir)) {
 		
 		if (p2 && de->d_type && de->d_type!=DT_DIR && de->d_type!=DT_LNK)
 			continue;
 
-		size_t l = strlen(de->d_name);
-		if (l >= PATH_MAX-pos) continue;
+		l = strlen(de->d_name);
+		if (l > SIZE_MAX-pos-1 ||
+		    reserve_path(bufp, capacity, pos+l+1)) {
+			closedir(dir);
+			return GLOB_NOSPACE;
+		}
+		buf = *bufp;
 
 		if (p2) *p2 = 0;
 
-		int fnm_flags= ((flags & GLOB_NOESCAPE) ? FNM_NOESCAPE : 0)
+		fnm_flags= ((flags & GLOB_NOESCAPE) ? FNM_NOESCAPE : 0)
 			| ((!(flags & GLOB_PERIOD)) ? FNM_PERIOD : 0);
 
 		if (fnmatch(pat, de->d_name, fnm_flags))
@@ -138,13 +182,15 @@ static int do_glob(char *buf, size_t pos, int type, char *pat, int flags, int (*
 
 		memcpy(buf+pos, de->d_name, l+1);
 		if (p2) *p2 = saved_sep;
-		int r = do_glob(buf, pos+l, de->d_type, p2 ? p2 : "", flags, errfunc, tail);
+		r = do_glob(bufp, capacity, pos+l, de->d_type,
+		            p2 ? p2 : "", flags, errfunc, tail);
 		if (r) {
 			closedir(dir);
 			return r;
 		}
+		buf = *bufp;
 	}
-	int readerr = errno;
+	readerr = errno;
 	if (p2) *p2 = saved_sep;
 	closedir(dir);
 	if (readerr && (errfunc(buf, errno) || (flags & GLOB_ERR)))
@@ -172,36 +218,71 @@ static int sort(const void *a, const void *b)
 	return strcmp(*(const char **)a, *(const char **)b);
 }
 
-static int expand_tilde(char **pat, char *buf, size_t *pos)
+static int expand_tilde(char **pat, char **bufp, size_t *capacity, size_t *pos)
 {
-	char *p = *pat + 1;
-	size_t i = 0;
+	char *p;
+	char *name_end;
+	char *home;
+	char *scratch;
+	char *grown;
+	size_t scratch_size;
+	size_t home_len;
+	char delim;
+	struct passwd pw;
+	struct passwd *res;
+	int result;
+	char *buf;
 
-	char delim, *name_end = __strchrnul(p, '/');
+	p = *pat + 1;
+	name_end = __strchrnul(p, '/');
 	if ((delim = *name_end)) *name_end++ = 0;
 	*pat = name_end;
 
-	char *home = *p ? NULL : getenv("HOME");
+	home = *p ? NULL : getenv("HOME");
+	scratch = NULL;
 	if (!home) {
-		struct passwd pw, *res;
-		switch (*p ? getpwnam_r(p, &pw, buf, PATH_MAX, &res)
-			   : getpwuid_r(getuid(), &pw, buf, PATH_MAX, &res)) {
-		case ENOMEM:
-			return GLOB_NOSPACE;
-		case 0:
-			if (!res)
-		default:
-				return GLOB_NOMATCH;
+		scratch_size = 256;
+		scratch = malloc(scratch_size);
+		if (!scratch) return GLOB_NOSPACE;
+		for (;;) {
+			result = *p ? getpwnam_r(p, &pw, scratch, scratch_size, &res)
+			            : getpwuid_r(getuid(), &pw, scratch, scratch_size, &res);
+			if (result != ERANGE) break;
+			if (scratch_size > SIZE_MAX/2) {
+				free(scratch);
+				return GLOB_NOSPACE;
+			}
+			scratch_size *= 2;
+			grown = realloc(scratch, scratch_size);
+			if (!grown) {
+				free(scratch);
+				return GLOB_NOSPACE;
+			}
+			scratch = grown;
+		}
+		if (result || !res) {
+			free(scratch);
+			return result == ENOMEM ? GLOB_NOSPACE : GLOB_NOMATCH;
 		}
 		home = pw.pw_dir;
 	}
-	while (i < PATH_MAX - 2 && *home)
-		buf[i++] = *home++;
-	if (*home)
-		return GLOB_NOMATCH;
-	if ((buf[i] = delim))
-		buf[++i] = 0;
-	*pos = i;
+	home_len = strlen(home);
+	if (home_len > SIZE_MAX-2 ||
+	    reserve_path(bufp, capacity, home_len+2)) {
+		if (scratch) free(scratch);
+		return GLOB_NOSPACE;
+	}
+	buf = *bufp;
+	memcpy(buf, home, home_len);
+	if (scratch) free(scratch);
+	if (delim) {
+		buf[home_len] = delim;
+		buf[home_len+1] = 0;
+		*pos = home_len+1;
+	} else {
+		buf[home_len] = 0;
+		*pos = home_len;
+	}
 	return 0;
 }
 
@@ -211,7 +292,19 @@ int glob(const char *restrict pat, int flags, int (*errfunc)(const char *path, i
 	size_t cnt, i;
 	size_t offs = (flags & GLOB_DOOFFS) ? g->gl_offs : 0;
 	int error = 0;
-	char buf[PATH_MAX];
+	char *buf;
+	size_t capacity;
+	char *p;
+	char *s;
+	size_t pos;
+	char **pathv;
+	size_t pointer_count;
+	size_t pointer_base;
+
+	capacity = 64;
+	buf = malloc(capacity);
+	if (!buf) return GLOB_NOSPACE;
+	buf[0] = 0;
 	
 	if (!errfunc) errfunc = ignore_err;
 
@@ -222,20 +315,25 @@ int glob(const char *restrict pat, int flags, int (*errfunc)(const char *path, i
 	}
 
 	if (*pat) {
-		char *p = strdup(pat);
-		if (!p) return GLOB_NOSPACE;
+		p = strdup(pat);
+		if (!p) {
+			free(buf);
+			return GLOB_NOSPACE;
+		}
 		buf[0] = 0;
-		size_t pos = 0;
-		char *s = p;
+		pos = 0;
+		s = p;
 		if ((flags & (GLOB_TILDE | GLOB_TILDE_CHECK)) && *p == '~')
-			error = expand_tilde(&s, buf, &pos);
+			error = expand_tilde(&s, &buf, &capacity, &pos);
 		if (!error)
-			error = do_glob(buf, pos, 0, s, flags, errfunc, &tail);
+			error = do_glob(&buf, &capacity, pos, 0, s, flags,
+			                errfunc, &tail);
 		free(p);
 	}
 
 	if (error == GLOB_NOSPACE) {
 		freelist(&head);
+		free(buf);
 		return error;
 	}
 	
@@ -243,25 +341,48 @@ int glob(const char *restrict pat, int flags, int (*errfunc)(const char *path, i
 	if (!cnt) {
 		if (flags & GLOB_NOCHECK) {
 			tail = &head;
-			if (append(&tail, pat, strlen(pat), 0))
+			if (append(&tail, pat, strlen(pat), 0)) {
+				free(buf);
 				return GLOB_NOSPACE;
+			}
 			cnt++;
-		} else if (!error)
+		} else if (!error) {
+			free(buf);
 			return GLOB_NOMATCH;
+		}
 	}
 
+	if (offs > SIZE_MAX-g->gl_pathc) {
+		freelist(&head);
+		free(buf);
+		return GLOB_NOSPACE;
+	}
+	pointer_base = offs+g->gl_pathc;
+	if (cnt == SIZE_MAX || pointer_base > SIZE_MAX-cnt-1) {
+		freelist(&head);
+		free(buf);
+		return GLOB_NOSPACE;
+	}
+	pointer_count = pointer_base+cnt+1;
+	if (pointer_count > SIZE_MAX/sizeof(char *)) {
+		freelist(&head);
+		free(buf);
+		return GLOB_NOSPACE;
+	}
 	if (flags & GLOB_APPEND) {
-		char **pathv = realloc(g->gl_pathv, (offs + g->gl_pathc + cnt + 1) * sizeof(char *));
+		pathv = realloc(g->gl_pathv, pointer_count * sizeof(char *));
 		if (!pathv) {
 			freelist(&head);
+			free(buf);
 			return GLOB_NOSPACE;
 		}
 		g->gl_pathv = pathv;
 		offs += g->gl_pathc;
 	} else {
-		g->gl_pathv = malloc((offs + cnt + 1) * sizeof(char *));
+		g->gl_pathv = malloc(pointer_count * sizeof(char *));
 		if (!g->gl_pathv) {
 			freelist(&head);
+			free(buf);
 			return GLOB_NOSPACE;
 		}
 		for (i=0; i<offs; i++)
@@ -275,6 +396,7 @@ int glob(const char *restrict pat, int flags, int (*errfunc)(const char *path, i
 	if (!(flags & GLOB_NOSORT))
 		qsort(g->gl_pathv+offs, cnt, sizeof(char *), sort);
 	
+	free(buf);
 	return error;
 }
 

@@ -3,10 +3,6 @@
 int pthread_setspecific(pthread_key_t k, const void *x)
 {
 	struct pthread *self = __pthread_self();
-	
-	if (self->tsd[k] != x) {
-		self->tsd[k] = (void *)x;
-		self->tsd_used = 1;
-	}
-	return 0;
+
+	return __pthread_tsd_set(self, k, (void *)x);
 }

@@ -22,8 +22,12 @@ weak_alias(__timezone, timezone);
 weak_alias(__daylight, daylight);
 weak_alias(__tzname, tzname);
 
-static char std_name[TZNAME_MAX+1];
-static char dst_name[TZNAME_MAX+1];
+static char std_name_inline[TZNAME_MAX+1];
+static char dst_name_inline[TZNAME_MAX+1];
+static char *std_name = std_name_inline;
+static char *dst_name = dst_name_inline;
+static size_t std_name_size = sizeof std_name_inline;
+static size_t dst_name_size = sizeof dst_name_inline;
 
 static int dst_off;
 static int r0[5], r1[5];
@@ -88,20 +92,41 @@ static void getrule(const char **p, int rule[5])
 	}
 }
 
-static void getname(char *d, const char **p)
+static void getname(char **destination, size_t *capacity,
+                    char *inline_buffer, const char **p)
 {
-	int i;
+	const char *start;
+	char *grown;
+	size_t length;
+
 	if (**p == '<') {
 		++*p;
-		for (i=0; (*p)[i] && (*p)[i]!='>'; i++)
-			if (i<TZNAME_MAX) d[i] = (*p)[i];
-		if ((*p)[i]) ++*p;
+		start = *p;
+		while (**p && **p != '>') ++*p;
+		length = (size_t)(*p-start);
+		if (**p) ++*p;
 	} else {
-		for (i=0; ((*p)[i]|32)-'a'<26U; i++)
-			if (i<TZNAME_MAX) d[i] = (*p)[i];
+		start = *p;
+		while ((**p|32)-'a'<26U) ++*p;
+		length = (size_t)(*p-start);
 	}
-	*p += i;
-	d[i<TZNAME_MAX?i:TZNAME_MAX] = 0;
+	if (length == SIZE_MAX) length = 0;
+	if (length+1 > *capacity) {
+		grown = malloc(length+1);
+		if (grown) {
+			if (*destination != inline_buffer) __libc_free(*destination);
+			*destination = grown;
+			*capacity = length+1;
+		}
+	}
+	if (length+1 <= *capacity) {
+		memcpy(*destination, start, length);
+		(*destination)[length] = 0;
+	} else {
+		length = *capacity-1;
+		memcpy(*destination, start, length);
+		(*destination)[length] = 0;
+	}
 }
 
 #define VEC(...) ((const unsigned char[]){__VA_ARGS__})
@@ -124,10 +149,21 @@ static size_t zi_dotprod(const unsigned char *z, const unsigned char *v, size_t 
 
 static void do_tzset()
 {
-	char buf[NAME_MAX+25], *pathname=buf+24;
+	char *pathbuf = 0;
+	char *pathname;
+	char *grown_tz;
+	char dummy_inline[TZNAME_MAX+1];
+	char *dummy_name;
+	size_t dummy_size;
 	const char *try, *s, *p;
 	const unsigned char *map = 0;
 	size_t i;
+	size_t l;
+	size_t skip;
+	size_t grown_size;
+	int posix_form;
+	int scale;
+	const unsigned char *zone_type;
 	static const char search[] =
 		"/usr/share/zoneinfo/\0/share/zoneinfo/\0/etc/zoneinfo/\0";
 
@@ -143,24 +179,32 @@ static void do_tzset()
 
 	
 	i = strlen(s);
-	if (i > PATH_MAX+1) s = __utc, i = 3;
 	if (i >= old_tz_size) {
-		old_tz_size *= 2;
-		if (i >= old_tz_size) old_tz_size = i+1;
-		if (old_tz_size > PATH_MAX+2) old_tz_size = PATH_MAX+2;
-		old_tz = malloc(old_tz_size);
+		if (i == SIZE_MAX) s = __utc, i = 3;
+		else {
+			grown_size = i+1;
+			grown_tz = malloc(grown_size);
+			if (grown_tz) {
+				if (old_tz != old_tz_buf) __libc_free(old_tz);
+				old_tz = grown_tz;
+				old_tz_size = grown_size;
+			}
+		}
 	}
-	if (old_tz) memcpy(old_tz, s, i+1);
+	if (i < old_tz_size) memcpy(old_tz, s, i+1);
+	else old_tz[0] = 0;
 
-	int posix_form = 0;
+	posix_form = 0;
 	if (*s != ':') {
 		p = s;
-		char dummy_name[TZNAME_MAX+1];
-		getname(dummy_name, &p);
+		dummy_name = dummy_inline;
+		dummy_size = sizeof dummy_inline;
+		getname(&dummy_name, &dummy_size, dummy_inline, &p);
 		if (p!=s && (*p == '+' || *p == '-' || isdigit(*p)
 		             || !strcmp(dummy_name, "UTC")
 		             || !strcmp(dummy_name, "GMT")))
 			posix_form = 1;
+		if (dummy_name != dummy_inline) __libc_free(dummy_name);
 	}	
 
 	
@@ -170,8 +214,10 @@ static void do_tzset()
 			if (!libc.secure || !strcmp(s, "/etc/localtime"))
 				map = __map_file(s, &map_size);
 		} else {
-			size_t l = strlen(s);
-			if (l <= NAME_MAX && !strchr(s, '.')) {
+			l = strlen(s);
+			if (l <= SIZE_MAX-25 && !strchr(s, '.') &&
+			    (pathbuf = malloc(l+25))) {
+				pathname = pathbuf+24;
 				memcpy(pathname, s, l+1);
 				pathname[l] = 0;
 				for (try=search; !map && *try; try+=l+1) {
@@ -179,6 +225,8 @@ static void do_tzset()
 					memcpy(pathname-l, try, l);
 					map = __map_file(pathname-l, &map_size);
 				}
+				__libc_free(pathbuf);
+				pathbuf = 0;
 			}
 		}
 		if (!map) s = __utc;
@@ -191,9 +239,9 @@ static void do_tzset()
 
 	zi = map;
 	if (map) {
-		int scale = 2;
+		scale = 2;
 		if (map[4]!='1') {
-			size_t skip = zi_dotprod(zi+20, VEC(1,1,8,5,6,1), 6);
+			skip = zi_dotprod(zi+20, VEC(1,1,8,5,6,1), 6);
 			trans = zi+skip+44+44;
 			scale++;
 		} else {
@@ -207,17 +255,17 @@ static void do_tzset()
 			for (s = (const char *)zi+map_size-2; *s!='\n'; s--);
 			s++;
 		} else {
-			const unsigned char *p;
+			zone_type = types;
 			__tzname[0] = __tzname[1] = 0;
 			__daylight = __timezone = dst_off = 0;
-			for (p=types; p<abbrevs; p+=6) {
-				if (!p[4] && !__tzname[0]) {
-					__tzname[0] = (char *)abbrevs + p[5];
-					__timezone = -zi_read32(p);
+			for (; zone_type<abbrevs; zone_type+=6) {
+				if (!zone_type[4] && !__tzname[0]) {
+					__tzname[0] = (char *)abbrevs + zone_type[5];
+					__timezone = -zi_read32(zone_type);
 				}
-				if (p[4] && !__tzname[1]) {
-					__tzname[1] = (char *)abbrevs + p[5];
-					dst_off = -zi_read32(p);
+				if (zone_type[4] && !__tzname[1]) {
+					__tzname[1] = (char *)abbrevs + zone_type[5];
+					dst_off = -zi_read32(zone_type);
 					__daylight = 1;
 				}
 			}
@@ -232,10 +280,10 @@ static void do_tzset()
 	}
 
 	if (!s) s = __utc;
-	getname(std_name, &s);
+	getname(&std_name, &std_name_size, std_name_inline, &s);
 	__tzname[0] = std_name;
 	__timezone = getoff(&s);
-	getname(dst_name, &s);
+	getname(&dst_name, &dst_name_size, dst_name_inline, &s);
 	__tzname[1] = dst_name;
 	if (dst_name[0]) {
 		__daylight = 1;

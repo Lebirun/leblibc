@@ -12,7 +12,10 @@ struct tm *getdate(const char *s)
 	struct tm *ret = 0;
 	char *datemsk = getenv("DATEMSK");
 	FILE *f = 0;
-	char fmt[100], *p;
+	char *fmt = 0;
+	char *p;
+	size_t fmt_capacity = 0;
+	ssize_t fmt_length;
 	int cs;
 
 	pthread_setcancelstate(PTHREAD_CANCEL_DEFERRED, &cs);
@@ -29,7 +32,8 @@ struct tm *getdate(const char *s)
 		goto out;
 	}
 
-	while (fgets(fmt, sizeof fmt, f)) {
+	while ((fmt_length = getline(&fmt, &fmt_capacity, f)) >= 0) {
+		(void)fmt_length;
 		p = strptime(s, fmt, &tmbuf);
 		if (p && !*p) {
 			ret = &tmbuf;
@@ -40,6 +44,7 @@ struct tm *getdate(const char *s)
 	if (ferror(f)) getdate_err = 5;
 	else getdate_err = 7;
 out:
+	free(fmt);
 	if (f) fclose(f);
 	pthread_setcancelstate(cs, 0);
 	return ret;

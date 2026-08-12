@@ -2,20 +2,24 @@
 #include "pthread_impl.h"
 #include <string.h>
 
-#define MIN(a,b) ((a)<(b) ? (a) : (b))
 #define MAX(a,b) ((a)>(b) ? (a) : (b))
 
 int pthread_setattr_default_np(const pthread_attr_t *attrp)
 {
-	
-	pthread_attr_t tmp = *attrp, zero = { 0 };
+	pthread_attr_t tmp;
+	pthread_attr_t zero;
+	size_t stack;
+	size_t guard;
+
+	tmp = *attrp;
+	zero = (pthread_attr_t){ 0 };
 	tmp._a_stacksize = 0;
 	tmp._a_guardsize = 0;
 	if (memcmp(&tmp, &zero, sizeof tmp))
 		return EINVAL;
 
-	unsigned stack = MIN(attrp->_a_stacksize, DEFAULT_STACK_MAX);
-	unsigned guard = MIN(attrp->_a_guardsize, DEFAULT_GUARD_MAX);
+	stack = attrp->_a_stacksize;
+	guard = attrp->_a_guardsize;
 
 	__inhibit_ptc();
 	__default_stacksize = MAX(__default_stacksize, stack);

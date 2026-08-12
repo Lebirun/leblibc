@@ -171,7 +171,6 @@ static void md5_update(struct md5 *s, const void *m, unsigned long len)
  * SUCH DAMAGE.
  */
 
-#define KEY_MAX 30000
 #define SALT_MAX 8
 
 static const unsigned char b64[] =
@@ -190,14 +189,13 @@ static char *md5crypt(const char *key, const char *setting, char *output)
 {
 	struct md5 ctx;
 	unsigned char md[16];
-	unsigned int i, klen, slen;
+	unsigned int i, slen;
+	size_t klen, j;
 	const char *salt;
 	char *p;
 
 	
-	klen = strnlen(key, KEY_MAX+1);
-	if (klen > KEY_MAX)
-		return 0;
+	klen = strlen(key);
 
 	
 	if (strncmp(setting, "$1$", 3) != 0)
@@ -217,12 +215,12 @@ static char *md5crypt(const char *key, const char *setting, char *output)
 	md5_init(&ctx);
 	md5_update(&ctx, key, klen);
 	md5_update(&ctx, setting, 3 + slen);
-	for (i = klen; i > sizeof md; i -= sizeof md)
+	for (j = klen; j > sizeof md; j -= sizeof md)
 		md5_update(&ctx, md, sizeof md);
-	md5_update(&ctx, md, i);
+	md5_update(&ctx, md, j);
 	md[0] = 0;
-	for (i = klen; i; i >>= 1)
-		if (i & 1)
+	for (j = klen; j; j >>= 1)
+		if (j & 1)
 			md5_update(&ctx, md, 1);
 		else
 			md5_update(&ctx, key, 1);

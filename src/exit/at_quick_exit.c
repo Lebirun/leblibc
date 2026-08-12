@@ -3,31 +3,42 @@
 #include "lock.h"
 #include "fork_impl.h"
 
-#define COUNT 32
+struct quick_exit_entry {
+	struct quick_exit_entry *next;
+	void (*func)(void);
+};
 
-static void (*funcs[COUNT])(void);
-static int count;
+static struct quick_exit_entry *funcs;
 static volatile int lock[1];
 volatile int *const __at_quick_exit_lockptr = lock;
 
 void __funcs_on_quick_exit()
 {
 	void (*func)(void);
+	struct quick_exit_entry *entry;
 	LOCK(lock);
-	while (count > 0) {
-		func = funcs[--count];
+	while (funcs) {
+		entry = funcs;
+		funcs = entry->next;
+		func = entry->func;
 		UNLOCK(lock);
 		func();
+		free(entry);
 		LOCK(lock);
 	}
 }
 
 int at_quick_exit(void (*func)(void))
 {
-	int r = 0;
+	struct quick_exit_entry *entry;
+
+	entry = malloc(sizeof(*entry));
+	if (!entry)
+		return -1;
+	entry->func = func;
 	LOCK(lock);
-	if (count == 32) r = -1;
-	else funcs[count++] = func;
+	entry->next = funcs;
+	funcs = entry;
 	UNLOCK(lock);
-	return r;
+	return 0;
 }

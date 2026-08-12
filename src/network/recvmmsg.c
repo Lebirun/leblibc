@@ -25,7 +25,6 @@ int recvmmsg(int fd, struct mmsghdr *msgvec, unsigned int vlen, unsigned int fla
 			timeout ? ((long long[]){s, ns}) : 0);
 	if (SYS_recvmmsg == SYS_recvmmsg_time64 || r!=-ENOSYS)
 		return __syscall_ret(r);
-	if (vlen > IOV_MAX) vlen = IOV_MAX;
 	socklen_t csize[vlen];
 	for (int i=0; i<vlen; i++) csize[i] = msgvec[i].msg_hdr.msg_controllen;
 	r = __syscall_cp(SYS_recvmmsg, fd, msgvec, vlen, flags,

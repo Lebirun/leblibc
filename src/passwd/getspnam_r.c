@@ -3,6 +3,7 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include <pthread.h>
+#include <stdint.h>
 #include "pwf.h"
 
 static long xatol(char **s)
@@ -53,11 +54,12 @@ static void cleanup(void *p)
 
 int getspnam_r(const char *name, struct spwd *sp, char *buf, size_t size, struct spwd **res)
 {
-	char path[20+NAME_MAX];
+	char *path;
 	FILE *f = 0;
 	int rv = 0;
 	int fd;
 	size_t k, l = strlen(name);
+	size_t path_size;
 	int skip = 0;
 	int cs;
 	int orig_errno = errno;
@@ -69,14 +71,19 @@ int getspnam_r(const char *name, struct spwd *sp, char *buf, size_t size, struct
 		return errno = EINVAL;
 
 	
-	if (size < l+100)
+	if (l > SIZE_MAX-100 || size < l+100)
 		return errno = ERANGE;
 
-	
-	if (snprintf(path, sizeof path, "/etc/tcb/%s/shadow", name) >= sizeof path)
-		return errno = EINVAL;
+	if (l > SIZE_MAX-17)
+		return errno = ENAMETOOLONG;
+	path_size = l+17;
+	path = malloc(path_size);
+	if (!path)
+		return errno = ENOMEM;
+	snprintf(path, path_size, "/etc/tcb/%s/shadow", name);
 
 	fd = open(path, O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC);
+	free(path);
 	if (fd >= 0) {
 		struct stat st = { 0 };
 		errno = EINVAL;

@@ -4,10 +4,8 @@
 int tss_set(tss_t k, void *x)
 {
 	struct pthread *self = __pthread_self();
-	
-	if (self->tsd[k] != x) {
-		self->tsd[k] = x;
-		self->tsd_used = 1;
-	}
-	return thrd_success;
+	int result;
+
+	result = __pthread_tsd_set(self, k, x);
+	return result ? thrd_error : thrd_success;
 }

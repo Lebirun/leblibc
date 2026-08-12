@@ -7,6 +7,8 @@
 #include <string.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdlib.h>
+#include <stdint.h>
 
 struct history
 {
@@ -23,6 +25,9 @@ struct history
 static int do_nftw(char *path, int (*fn)(const char *, const struct stat *, int, struct FTW *), int fd_limit, int flags, struct history *h)
 {
 	size_t l = strlen(path), j = l && path[l-1]=='/' ? l-1 : l;
+	size_t name_len;
+	size_t child_len;
+	char *child;
 	struct stat st;
 	struct history new;
 	int type;
@@ -94,14 +99,24 @@ static int do_nftw(char *path, int (*fn)(const char *, const struct stat *, int,
 				 && (!de->d_name[1]
 				  || (de->d_name[1]=='.'
 				   && !de->d_name[2]))) continue;
-				if (strlen(de->d_name) >= PATH_MAX-l) {
-					errno = ENAMETOOLONG;
+				name_len = strlen(de->d_name);
+				if (name_len > SIZE_MAX-2 || j > SIZE_MAX-name_len-2) {
+					errno = ENOMEM;
 					closedir(d);
 					return -1;
 				}
-				path[j]='/';
-				strcpy(path+j+1, de->d_name);
-				if ((r=do_nftw(path, fn, fd_limit-1, flags, &new))) {
+				child_len = j+name_len+2;
+				child = malloc(child_len);
+				if (!child) {
+					closedir(d);
+					return -1;
+				}
+				memcpy(child, path, j);
+				child[j]='/';
+				memcpy(child+j+1, de->d_name, name_len+1);
+				r = do_nftw(child, fn, fd_limit-1, flags, &new);
+				free(child);
+				if (r) {
 					closedir(d);
 					return r;
 				}
@@ -123,20 +138,16 @@ static int do_nftw(char *path, int (*fn)(const char *, const struct stat *, int,
 int nftw(const char *path, int (*fn)(const char *, const struct stat *, int, struct FTW *), int fd_limit, int flags)
 {
 	int r, cs;
-	size_t l;
-	char pathbuf[PATH_MAX+1];
+	char *pathbuf;
 
 	if (fd_limit <= 0) return 0;
 
-	l = strlen(path);
-	if (l > PATH_MAX) {
-		errno = ENAMETOOLONG;
-		return -1;
-	}
-	memcpy(pathbuf, path, l+1);
+	pathbuf = strdup(path);
+	if (!pathbuf) return -1;
 	
 	pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, &cs);
 	r = do_nftw(pathbuf, fn, fd_limit, flags, NULL);
 	pthread_setcancelstate(cs, 0);
+	free(pathbuf);
 	return r;
 }

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdint.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
 #include <ctype.h>
@@ -19,7 +20,7 @@
 
 struct binding {
 	struct binding *next;
-	int dirlen;
+	size_t dirlen;
 	volatile int active;
 	char *domainname;
 	char *dirname;
@@ -46,16 +47,21 @@ volatile int *const __gettext_lockptr = lock;
 char *bindtextdomain(const char *domainname, const char *dirname)
 {
 	struct binding *p, *q;
+	size_t domlen;
+	size_t dirlen;
+	size_t alloc_size;
 
 	if (!domainname) return 0;
 	if (!dirname) return gettextdir(domainname, &(size_t){0});
 
-	size_t domlen = strnlen(domainname, NAME_MAX+1);
-	size_t dirlen = strnlen(dirname, PATH_MAX);
-	if (domlen > NAME_MAX || dirlen >= PATH_MAX) {
-		errno = EINVAL;
+	domlen = strlen(domainname);
+	dirlen = strlen(dirname);
+	if (domlen > SIZE_MAX-dirlen || domlen+dirlen > SIZE_MAX-2 ||
+	    sizeof *p > SIZE_MAX-(domlen+dirlen+2)) {
+		errno = ENOMEM;
 		return 0;
 	}
+	alloc_size = sizeof *p + domlen + dirlen + 2;
 
 	LOCK(lock);
 
@@ -67,7 +73,7 @@ char *bindtextdomain(const char *domainname, const char *dirname)
 	}
 
 	if (!p) {
-		p = calloc(sizeof *p + domlen + dirlen + 2, 1);
+		p = calloc(alloc_size, 1);
 		if (!p) {
 			UNLOCK(lock);
 			return 0;
@@ -139,8 +145,7 @@ char *dcngettext(const char *domainname, const char *msgid1, const char *msgid2,
 
 	if (!domainname) domainname = __gettextdomain();
 
-	domlen = strnlen(domainname, NAME_MAX+1);
-	if (domlen > NAME_MAX) goto notrans;
+	domlen = strlen(domainname);
 
 	for (q=bindings; q; q=q->next)
 		if (!strcmp(q->domainname, domainname) && q->active)

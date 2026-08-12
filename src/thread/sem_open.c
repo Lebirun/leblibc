@@ -11,19 +11,21 @@
 #include <sys/stat.h>
 #include <stdlib.h>
 #include <pthread.h>
+#include <stdint.h>
 #include "lock.h"
 #include "fork_impl.h"
 
 #define malloc __libc_malloc
 #define calloc __libc_calloc
-#define realloc undef
-#define free undef
+#define realloc __libc_realloc
+#define free __libc_free
 
 static struct {
 	ino_t ino;
 	sem_t *sem;
-	int refcnt;
+	size_t refcnt;
 } *semtab;
+static size_t semtab_cap;
 static volatile int lock[1];
 volatile int *const __sem_open_lockptr = lock;
 
@@ -34,35 +36,51 @@ sem_t *sem_open(const char *name, int flags, ...)
 	va_list ap;
 	mode_t mode;
 	unsigned value;
-	int fd, i, e, slot, first=1, cnt, cs;
+	int fd, e, first=1, cs;
+	size_t i, slot;
 	sem_t newsem;
 	void *map;
 	char tmp[64];
 	struct timespec ts;
 	struct stat st;
-	char buf[NAME_MAX+10];
+	char *mapped_name;
+	void *newtab;
+	size_t newcap;
+	int saved_errno;
 
-	if (!(name = __shm_mapname(name, buf)))
+	mapped_name = __shm_mapname(name);
+	if (!mapped_name)
 		return SEM_FAILED;
+	name = mapped_name;
 
 	LOCK(lock);
 	
-	if (!semtab && !(semtab = calloc(sizeof *semtab, SEM_NSEMS_MAX))) {
-		UNLOCK(lock);
-		return SEM_FAILED;
-	}
-
-	
-	slot = -1;
-	for (cnt=i=0; i<SEM_NSEMS_MAX; i++) {
-		cnt += semtab[i].refcnt;
-		if (!semtab[i].sem && slot < 0) slot = i;
+	slot = SIZE_MAX;
+	for (i=0; i<semtab_cap; i++) {
+		if (!semtab[i].sem && slot == SIZE_MAX) slot = i;
 	}
 	
-	if (cnt == INT_MAX || slot < 0) {
-		errno = EMFILE;
-		UNLOCK(lock);
-		return SEM_FAILED;
+	if (slot == SIZE_MAX) {
+		newcap = semtab_cap ? semtab_cap * 2 : 1;
+		if (newcap <= semtab_cap || newcap > SIZE_MAX / sizeof(*semtab)) {
+			errno = ENOMEM;
+			UNLOCK(lock);
+			free(mapped_name);
+			return SEM_FAILED;
+		}
+		newtab = realloc(semtab, newcap * sizeof(*semtab));
+		if (!newtab) {
+			saved_errno = errno;
+			UNLOCK(lock);
+			free(mapped_name);
+			errno = saved_errno;
+			return SEM_FAILED;
+		}
+		semtab = newtab;
+		memset(semtab + semtab_cap, 0,
+		       (newcap - semtab_cap) * sizeof(*semtab));
+		slot = semtab_cap;
+		semtab_cap = newcap;
 	}
 	
 	semtab[slot].sem = (sem_t *)-1;
@@ -134,40 +152,73 @@ sem_t *sem_open(const char *name, int flags, ...)
 
 	
 	LOCK(lock);
-	for (i=0; i<SEM_NSEMS_MAX && semtab[i].ino != st.st_ino; i++);
-	if (i<SEM_NSEMS_MAX) {
+	for (i=0; i<semtab_cap && semtab[i].ino != st.st_ino; i++);
+	if (i<semtab_cap) {
 		munmap(map, sizeof(sem_t));
 		semtab[slot].sem = 0;
 		slot = i;
 		map = semtab[i].sem;
 	}
+	if (semtab[slot].refcnt == SIZE_MAX) {
+		UNLOCK(lock);
+		free(mapped_name);
+		pthread_setcancelstate(cs, 0);
+		errno = EMFILE;
+		return SEM_FAILED;
+	}
 	semtab[slot].refcnt++;
 	semtab[slot].sem = map;
 	semtab[slot].ino = st.st_ino;
 	UNLOCK(lock);
+	free(mapped_name);
 	pthread_setcancelstate(cs, 0);
 	return map;
 
 fail:
+	saved_errno = errno;
+	free(mapped_name);
 	pthread_setcancelstate(cs, 0);
 	LOCK(lock);
 	semtab[slot].sem = 0;
 	UNLOCK(lock);
+	errno = saved_errno;
 	return SEM_FAILED;
 }
 
 int sem_close(sem_t *sem)
 {
-	int i;
+	size_t i;
+	size_t active;
+	void *oldtab;
+
 	LOCK(lock);
-	for (i=0; i<SEM_NSEMS_MAX && semtab[i].sem != sem; i++);
+	for (i=0; i<semtab_cap && semtab[i].sem != sem; i++);
+	if (i == semtab_cap) {
+		UNLOCK(lock);
+		errno = EINVAL;
+		return -1;
+	}
 	if (--semtab[i].refcnt) {
 		UNLOCK(lock);
 		return 0;
 	}
 	semtab[i].sem = 0;
 	semtab[i].ino = 0;
+	active = 0;
+	for (i=0; i<semtab_cap; i++) {
+		if (semtab[i].sem) {
+			active = 1;
+			break;
+		}
+	}
+	oldtab = 0;
+	if (!active) {
+		oldtab = semtab;
+		semtab = 0;
+		semtab_cap = 0;
+	}
 	UNLOCK(lock);
+	if (oldtab) free(oldtab);
 	munmap(sem, sizeof *sem);
 	return 0;
 }

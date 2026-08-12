@@ -5,11 +5,22 @@
 #include "libc.h"
 #include "lock.h"
 
-static char buf[LC_ALL*(LOCALE_NAME_MAX+1)];
+static char buf[LC_ALL*24];
+static char *large_buf;
+static size_t large_buf_size;
 
 char *setlocale(int cat, const char *name)
 {
 	const struct __locale_map *lm;
+	struct __locale_struct tmp_locale;
+	const char *p;
+	const char *z;
+	const char *part;
+	char *result;
+	size_t length;
+	size_t part_length;
+	int i;
+	int same;
 
 	if ((unsigned)cat > LC_ALL) return 0;
 
@@ -17,19 +28,21 @@ char *setlocale(int cat, const char *name)
 
 	
 	if (cat == LC_ALL) {
-		int i;
 		if (name) {
-			struct __locale_struct tmp_locale;
-			char part[LOCALE_NAME_MAX+1] = "C.UTF-8";
-			const char *p = name;
+			p = name;
 			for (i=0; i<LC_ALL; i++) {
-				const char *z = __strchrnul(p, ';');
-				if (z-p <= LOCALE_NAME_MAX) {
-					memcpy(part, p, z-p);
-					part[z-p] = 0;
-					if (*z) p = z+1;
+				z = __strchrnul(p, ';');
+				part_length = (size_t)(z-p);
+				result = malloc(part_length+1);
+				if (!result) {
+					UNLOCK(__locale_lock);
+					return 0;
 				}
-				lm = __get_locale(i, part);
+				memcpy(result, p, part_length);
+				result[part_length] = 0;
+				if (*z) p = z+1;
+				lm = __get_locale(i, result);
+				free(result);
 				if (lm == LOC_MAP_FAILED) {
 					UNLOCK(__locale_lock);
 					return 0;
@@ -38,22 +51,51 @@ char *setlocale(int cat, const char *name)
 			}
 			libc.global_locale = tmp_locale;
 		}
-		char *s = buf;
-		const char *part;
-		int same = 0;
+		length = 0;
+		same = 0;
 		for (i=0; i<LC_ALL; i++) {
-			const struct __locale_map *lm =
-				libc.global_locale.cat[i];
+			lm = libc.global_locale.cat[i];
 			if (lm == libc.global_locale.cat[0]) same++;
 			part = lm ? lm->name : "C";
-			size_t l = strlen(part);
-			memcpy(s, part, l);
-			s[l] = ';';
-			s += l+1;
+			part_length = strlen(part);
+			if (length > SIZE_MAX-part_length-1) {
+				UNLOCK(__locale_lock);
+				return 0;
+			}
+			length += part_length+1;
 		}
-		*--s = 0;
+		if (same == LC_ALL) {
+			part = libc.global_locale.cat[0] ?
+				libc.global_locale.cat[0]->name : "C";
+			UNLOCK(__locale_lock);
+			return (char *)part;
+		}
+		if (length > sizeof buf) {
+			if (length > large_buf_size) {
+				result = realloc(large_buf, length);
+				if (!result) {
+					UNLOCK(__locale_lock);
+					return 0;
+				}
+				large_buf = result;
+				large_buf_size = length;
+			}
+			result = large_buf;
+		} else {
+			result = buf;
+		}
+		length = 0;
+		for (i=0; i<LC_ALL; i++) {
+			lm = libc.global_locale.cat[i];
+			part = lm ? lm->name : "C";
+			part_length = strlen(part);
+			memcpy(result+length, part, part_length);
+			length += part_length;
+			result[length++] = ';';
+		}
+		result[length-1] = 0;
 		UNLOCK(__locale_lock);
-		return same==LC_ALL ? (char *)part : buf;
+		return result;
 	}
 
 	if (name) {
@@ -66,9 +108,9 @@ char *setlocale(int cat, const char *name)
 	} else {
 		lm = libc.global_locale.cat[cat];
 	}
-	char *ret = lm ? (char *)lm->name : "C";
+	result = lm ? (char *)lm->name : "C";
 
 	UNLOCK(__locale_lock);
 
-	return ret;
+	return result;
 }

@@ -185,15 +185,14 @@ static char *to64(char *s, unsigned int u, int n)
 	return s;
 }
 
-#define KEY_MAX 256
 #define SALT_MAX 16
 #define ROUNDS_DEFAULT 5000
 #define ROUNDS_MIN 1000
 #define ROUNDS_MAX 9999999
 
-static void hashmd(struct sha512 *s, unsigned int n, const void *md)
+static void hashmd(struct sha512 *s, size_t n, const void *md)
 {
-	unsigned int i;
+	size_t i;
 
 	for (i = n; i > 64; i -= 64)
 		sha512_update(s, md, 64);
@@ -204,16 +203,16 @@ static char *sha512crypt(const char *key, const char *setting, char *output)
 {
 	struct sha512 ctx;
 	unsigned char md[64], kmd[64], smd[64];
-	unsigned int i, r, klen, slen;
+	unsigned int i, r, slen;
+	size_t klen, j;
 	char rounds[20] = "";
 	const char *salt;
 	char *p;
+	unsigned long u;
+	char *end;
 
 	
-	for (i = 0; i <= KEY_MAX && key[i]; i++);
-	if (i > KEY_MAX)
-		return 0;
-	klen = i;
+	klen = strlen(key);
 
 	
 	if (strncmp(setting, "$6$", 3) != 0)
@@ -222,9 +221,6 @@ static char *sha512crypt(const char *key, const char *setting, char *output)
 
 	r = ROUNDS_DEFAULT;
 	if (strncmp(salt, "rounds=", sizeof "rounds=" - 1) == 0) {
-		unsigned long u;
-		char *end;
-
 		
 		salt += sizeof "rounds=" - 1;
 		if (!isdigit(*salt))
@@ -261,8 +257,8 @@ static char *sha512crypt(const char *key, const char *setting, char *output)
 	sha512_update(&ctx, key, klen);
 	sha512_update(&ctx, salt, slen);
 	hashmd(&ctx, klen, md);
-	for (i = klen; i > 0; i >>= 1)
-		if (i & 1)
+	for (j = klen; j > 0; j >>= 1)
+		if (j & 1)
 			sha512_update(&ctx, md, sizeof md);
 		else
 			sha512_update(&ctx, key, klen);
@@ -270,7 +266,7 @@ static char *sha512crypt(const char *key, const char *setting, char *output)
 
 	
 	sha512_init(&ctx);
-	for (i = 0; i < klen; i++)
+	for (j = 0; j < klen; j++)
 		sha512_update(&ctx, key, klen);
 	sha512_sum(&ctx, kmd);
 
