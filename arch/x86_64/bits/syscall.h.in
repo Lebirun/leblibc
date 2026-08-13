@@ -346,7 +346,7 @@
 #define __NR_shutdown (106 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_userfaultfd (374 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_membarrier (375 | LEBIRUN_SYSCALL_FLAG)
-#define __NR_copy_file_range (377 | LEBIRUN_SYSCALL_FLAG)
+#define __NR_copy_file_range (70 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_statx (383 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_arch_prctl (198 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_rseq (386 | LEBIRUN_SYSCALL_FLAG)
