@@ -1,6 +1,8 @@
 #include <features.h>
 #include "libc.h"
 
+__asm__(".section .note.GNU-stack,\"\",@progbits");
+
 #define START "_start"
 
 #include "crt_arch.h"

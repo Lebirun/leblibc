@@ -34,7 +34,7 @@ LIBCC = -lgcc
 CPPFLAGS =
 CFLAGS =
 CFLAGS_AUTO = -Oz -pipe -ffunction-sections -fdata-sections
-CFLAGS_C99FSE = -std=c99 -ffreestanding -nostdinc 
+CFLAGS_C99FSE = -std=c99 -ffreestanding -nostdinc -Wa,--noexecstack
 
 CFLAGS_ALL = $(CFLAGS_C99FSE)
 CFLAGS_ALL += -D_XOPEN_SOURCE=700 -I$(srcdir)/arch/$(ARCH) -I$(srcdir)/arch/generic -Iobj/src/internal -I$(srcdir)/src/include -I$(srcdir)/src/internal -Iobj/include -I$(srcdir)/include
