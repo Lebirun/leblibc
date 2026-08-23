@@ -1,3 +1,6 @@
+#ifndef _SYS_VT_H
+#define _SYS_VT_H
+
 #include <bits/vt.h>
 #include <stdint.h>
 
@@ -9,3 +12,5 @@ struct vt_stat2 {
 	uint64_t v_state_words;
 	uint64_t v_state_ptr;
 };
+
+#endif
