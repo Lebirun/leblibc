@@ -136,6 +136,7 @@ void lcong48 (unsigned short [7]);
 
 #if defined(_GNU_SOURCE) || defined(_BSD_SOURCE)
 #include <alloca.h>
+void arc4random_buf(void *, size_t);
 char *mktemp (char *);
 int mkstemps (char *, int);
 int mkostemps (char *, int, int);

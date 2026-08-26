@@ -2,6 +2,7 @@
 #define _LINUX_FB_H
 
 #include <stdint.h>
+#include <linux/types.h>
 
 #define FBIOGET_VSCREENINFO 0x4600
 #define FBIOPUT_VSCREENINFO 0x4601
@@ -10,8 +11,20 @@
 #define FBIOPUTCMAP 0x4605
 
 #define FB_TYPE_PACKED_PIXELS 0
+#define FB_TYPE_PLANES 1
+#define FB_TYPE_INTERLEAVED_PLANES 2
+#define FB_TYPE_TEXT 3
+#define FB_TYPE_VGA_PLANES 4
+#define FB_VISUAL_MONO01 0
+#define FB_VISUAL_MONO10 1
 #define FB_VISUAL_TRUECOLOR 2
+#define FB_VISUAL_PSEUDOCOLOR 3
+#define FB_VISUAL_DIRECTCOLOR 4
+#define FB_VISUAL_STATIC_PSEUDOCOLOR 5
 #define FB_ACTIVATE_NOW 0
+#define FB_SYNC_HOR_HIGH_ACT 1
+#define FB_SYNC_VERT_HIGH_ACT 2
+#define FB_CHANGE_CMAP_VBL 32
 #define FB_VMODE_NONINTERLACED 0
 
 struct fb_bitfield {
