@@ -37,12 +37,16 @@ static const uint8_t small_cnt_tab[][3] = {
 
 static const uint8_t med_cnt_tab[4] = { 28, 24, 20, 32 };
 
-struct malloc_context ctx = { 0 };
+struct malloc_context ctx __attribute__((section(".bss.hot.user")));
 
 struct meta *alloc_meta(void)
 {
 	struct meta *m;
 	unsigned char *p;
+	size_t pagesize;
+	size_t n;
+	int need_unprotect;
+
 	if (!ctx.init_done) {
 #ifndef PAGESIZE
 		ctx.pagesize = get_page_size();
@@ -50,13 +54,18 @@ struct meta *alloc_meta(void)
 		ctx.secret = get_random_secret();
 		ctx.init_done = 1;
 	}
-	size_t pagesize = PGSZ;
+	pagesize = PGSZ;
 	if (pagesize < 4096) pagesize = 4096;
 	if ((m = dequeue_head(&ctx.free_meta_head))) return m;
+	if (ctx.bootstrap_meta_used < BOOTSTRAP_META_COUNT) {
+		m = &ctx.bootstrap_meta[ctx.bootstrap_meta_used++];
+		m->prev = m->next = 0;
+		return m;
+	}
 	if (!ctx.avail_meta_count) {
-		int need_unprotect = 1;
+		need_unprotect = 1;
 		if (!ctx.avail_meta_area_count) {
-			size_t n = 2UL << ctx.meta_alloc_shift;
+			n = 2UL << ctx.meta_alloc_shift;
 			p = mmap(0, n*pagesize, PROT_NONE,
 				MAP_PRIVATE|MAP_ANON, -1, 0);
 			if (p==MAP_FAILED) return 0;
@@ -72,11 +81,8 @@ struct meta *alloc_meta(void)
 				return 0;
 		ctx.avail_meta_area_count--;
 		ctx.avail_meta_areas = p + 4096;
-		if (ctx.meta_area_tail) {
+		if (ctx.meta_area_tail)
 			ctx.meta_area_tail->next = (void *)p;
-		} else {
-			ctx.meta_area_head = (void *)p;
-		}
 		ctx.meta_area_tail = (void *)p;
 		ctx.meta_area_tail->check = ctx.secret;
 		ctx.avail_meta_count = ctx.meta_area_tail->nslots

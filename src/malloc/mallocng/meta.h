@@ -13,6 +13,7 @@ extern const uint16_t size_classes[];
 
 #define UNIT 16
 #define IB 4
+#define BOOTSTRAP_META_COUNT 24
 
 struct group {
 	struct meta *meta;
@@ -48,16 +49,33 @@ struct malloc_context {
 	struct meta *free_meta_head;
 	struct meta *avail_meta;
 	size_t avail_meta_count, avail_meta_area_count, meta_alloc_shift;
-	struct meta_area *meta_area_head, *meta_area_tail;
+	struct meta_area *meta_area_tail;
 	unsigned char *avail_meta_areas;
 	struct meta *active[48];
 	size_t usage_by_class[48];
 	uint8_t unmap_seq[32], bounces[32];
 	uint8_t seq;
+	size_t bootstrap_meta_used;
+	struct meta bootstrap_meta[BOOTSTRAP_META_COUNT];
 };
 
 __attribute__((__visibility__("hidden")))
 extern struct malloc_context ctx;
+
+static inline int is_bootstrap_meta(const struct meta *meta)
+{
+	uintptr_t address;
+	uintptr_t start;
+	uintptr_t end;
+	uintptr_t offset;
+
+	address = (uintptr_t)meta;
+	start = (uintptr_t)ctx.bootstrap_meta;
+	end = start + ctx.bootstrap_meta_used * sizeof(struct meta);
+	if (address < start || address >= end) return 0;
+	offset = address - start;
+	return offset % sizeof(struct meta) == 0;
+}
 
 #ifdef PAGESIZE
 #define PGSZ PAGESIZE
@@ -127,22 +145,28 @@ static inline int get_slot_index(const unsigned char *p)
 
 static inline struct meta *get_meta(const unsigned char *p)
 {
+	int offset;
+	int index;
+	const struct group *base;
+	const struct meta *meta;
+	const struct meta_area *area;
+
 	assert(!((uintptr_t)p & 15));
-	int offset = *(const uint16_t *)(p - 2);
-	int index = get_slot_index(p);
+	offset = *(const uint16_t *)(p - 2);
+	index = get_slot_index(p);
 	if (p[-4]) {
 		assert(!offset);
 		offset = *(uint32_t *)(p - 8);
 		assert(offset > 0xffff);
 	}
-	const struct group *base = (const void *)(p - UNIT*offset - UNIT);
-	const struct meta *meta = base->meta;
+	base = (const void *)(p - UNIT*offset - UNIT);
+	meta = base->meta;
 	assert(meta->mem == base);
 	assert(index <= meta->last_idx);
 	assert(!(meta->avail_mask & (1u<<index)));
 	assert(!(meta->freed_mask & (1u<<index)));
-	const struct meta_area *area = (void *)((uintptr_t)meta & -4096);
-	assert(area->check == ctx.secret);
+	area = (void *)((uintptr_t)meta & -4096);
+	assert(is_bootstrap_meta(meta) || area->check == ctx.secret);
 	if (meta->sizeclass < 48) {
 		assert(offset >= size_classes[meta->sizeclass]*index);
 		assert(offset < size_classes[meta->sizeclass]*(index+1));
