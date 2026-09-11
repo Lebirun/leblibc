@@ -152,7 +152,7 @@ obj/src/leb_syscalls.o: ../src/leb_syscalls.c $(GENH) $(IMPH)
 obj/src/leb_syscalls.lo: ../src/leb_syscalls.c $(GENH) $(IMPH)
 	$(CC) $(CFLAGS_ALL) -fPIC -c -o $@ $<
 lib/libc.so: $(LOBJS) $(LDSO_OBJS)
-	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -shared \
+	$(CC) $(CFLAGS_ALL) $(LDFLAGS_ALL) -nostdlib -Wl,-shared \
 	-Wl,-e,_dlstart -o $@ $(LOBJS) $(LDSO_OBJS) $(LIBCC)
 
 lib/libc.a: $(AOBJS)
