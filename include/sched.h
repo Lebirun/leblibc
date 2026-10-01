@@ -83,7 +83,7 @@ void *(memset)(void *, int, size_t);
 void *(calloc)(size_t, size_t);
 void (free)(void *);
 
-typedef struct cpu_set_t { unsigned long __bits[128/sizeof(long)]; } cpu_set_t;
+typedef struct cpu_set_t { unsigned long __bits[1024/sizeof(long)]; } cpu_set_t;
 int __sched_cpucount(size_t, const cpu_set_t *);
 int sched_getcpu(void);
 int sched_getaffinity(pid_t, size_t, cpu_set_t *);
