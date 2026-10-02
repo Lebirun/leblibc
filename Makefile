@@ -28,7 +28,7 @@ GENH = obj/include/bits/alltypes.h obj/include/bits/syscall.h
 GENH_INT = obj/src/internal/version.h
 IMPH = $(addprefix $(srcdir)/, src/internal/stdio_impl.h src/internal/pthread_impl.h src/internal/locale_impl.h src/internal/libc.h)
 
-LDFLAGS =
+LDFLAGS = -Wl,-z,noexecstack
 LDFLAGS_AUTO =
 LIBCC = -lgcc
 CPPFLAGS =
