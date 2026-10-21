@@ -29,7 +29,7 @@
 #define __NR_setuid32 (137 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_getuid (133 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_getuid32 (133 | LEBIRUN_SYSCALL_FLAG)
-#define __NR_ptrace (26 | LEBIRUN_SYSCALL_FLAG)
+#define __NR_ptrace (357 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_alarm (132 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_pause (131 | LEBIRUN_SYSCALL_FLAG)
 #define __NR_utime (30 | LEBIRUN_SYSCALL_FLAG)
