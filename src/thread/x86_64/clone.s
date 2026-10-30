@@ -21,8 +21,8 @@ __clone:
 	pop %r11
 	pop %rdi
 	call *%r11
-	mov %eax,%edi
-	xor %eax,%eax
+	mov %eax,%ebx
+	mov $0x80000000,%eax
 	int $0x80
 	hlt
 1:	pop %rbx
