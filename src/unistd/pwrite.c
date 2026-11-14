@@ -6,7 +6,7 @@
 
 ssize_t pwrite(int fd, const void *buf, size_t size, off_t ofs)
 {
-	int result;
+	long result;
 
 	if (ofs == -1) ofs--;
 	result = __syscall_cp(SYS_pwritev2, fd,

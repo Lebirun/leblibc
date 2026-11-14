@@ -274,6 +274,8 @@ int __pthread_key_delete(pthread_key_t k)
 void __pthread_tsd_run_dtors()
 {
 	pthread_t self;
+	struct extended_tsd **link;
+	struct extended_tsd *entry;
 	size_t i;
 	int j;
 	void *val;
@@ -300,6 +302,18 @@ void __pthread_tsd_run_dtors()
 			i++;
 		}
 	}
+	if (!self->tsd_used) return;
+	__pthread_rwlock_wrlock(&key_lock);
+	for (link = &extended_values; *link; ) {
+		entry = *link;
+		if (entry->thread == self) {
+			*link = entry->next;
+			free(entry);
+		} else {
+			link = &entry->next;
+		}
+	}
+	__pthread_rwlock_unlock(&key_lock);
 }
 
 weak_alias(__pthread_key_create, pthread_key_create);
